@@ -44,19 +44,7 @@ export class AuthService {
   private static getUsers(): StoredAccount[] {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.USERS_DB);
-      if (!raw) {
-        const initialAccount: StoredAccount = {
-          id: 'user-demo-1',
-          name: 'Ilyas Pratama',
-          email: 'ilyas@dsat16.id',
-          passwordHash: 'sat1600',
-          targetScore: 1560,
-          joinedAt: '2026-08-15',
-          avatarColor: 'bg-orange-500'
-        };
-        localStorage.setItem(STORAGE_KEYS.USERS_DB, JSON.stringify([initialAccount]));
-        return [initialAccount];
-      }
+      if (!raw) return [];
       return JSON.parse(raw);
     } catch {
       return [];
@@ -70,22 +58,7 @@ export class AuthService {
   static getCurrentUser(): AuthUser | null {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-      if (!raw) {
-        const users = this.getUsers();
-        if (users.length > 0) {
-          const defaultUser: AuthUser = {
-            id: users[0].id,
-            name: users[0].name,
-            email: users[0].email,
-            targetScore: users[0].targetScore,
-            joinedAt: users[0].joinedAt,
-            avatarColor: users[0].avatarColor
-          };
-          this.setCurrentUser(defaultUser);
-          return defaultUser;
-        }
-        return null;
-      }
+      if (!raw) return null;
       return JSON.parse(raw);
     } catch {
       return null;
@@ -376,12 +349,40 @@ export class AuthService {
       this.setCurrentUser(userProfile);
       return { success: true, user: userProfile };
     } catch (err: any) {
-      if (err.code === 'auth/popup-closed-by-user') {
-        return { success: false, error: 'Jendela login Google ditutup sebelum selesai.' };
-      } else if (err.code === 'auth/cancelled-popup-request') {
-        return { success: false, error: 'Permintaan popup dibatalkan.' };
+      console.error('[MoSAT Firebase Google Auth Error]:', err);
+      const code = err?.code || '';
+      if (code === 'auth/popup-closed-by-user') {
+        return { success: false, error: 'Jendela login Google ditutup sebelum proses selesai.' };
       }
-      return { success: false, error: err.message || 'Gagal masuk dengan Google.' };
+      if (code === 'auth/cancelled-popup-request') {
+        return { success: false, error: 'Proses login dibatalkan karena ada permintaan baru.' };
+      }
+      if (code === 'auth/popup-blocked') {
+        return { 
+          success: false, 
+          error: 'Jendela popup Google diblokir oleh browser. Mohon izinkan pop-up untuk situs ini (klik ikon popup di kolom alamat browser).' 
+        };
+      }
+      if (code === 'auth/unauthorized-domain') {
+        const domain = typeof window !== 'undefined' ? window.location.hostname : 'domain ini';
+        return { 
+          success: false, 
+          error: `Domain "${domain}" belum diizinkan di Firebase. Buka Firebase Console > Authentication > Settings > Authorized domains, lalu klik "Add domain" dan masukkan "${domain}".` 
+        };
+      }
+      if (code === 'auth/operation-not-allowed' || code === 'auth/configuration-not-found') {
+        return { 
+          success: false, 
+          error: 'Login Google belum diaktifkan di Firebase Console. Buka Firebase Console > Authentication > Sign-in method > Google, lalu aktifkan (Enable) dan simpan.' 
+        };
+      }
+      if (code === 'auth/network-request-failed') {
+        return { success: false, error: 'Koneksi jaringan terputus. Mohon periksa koneksi internet Anda.' };
+      }
+      return { 
+        success: false, 
+        error: `Gagal masuk dengan Google (${code || 'error'}): ${err.message || 'Periksa status autentikasi di Firebase Console.'}` 
+      };
     }
   }
 

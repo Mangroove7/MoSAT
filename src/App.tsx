@@ -1,12 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { Navbar, ActiveTab } from './components/Navbar';
-import { MockTestContainer } from './components/mock-test/MockTestContainer';
-import { DrillHub } from './components/drill/DrillHub';
-import { DrillSession } from './components/drill/DrillSession';
-import { VocabHub } from './components/vocab/VocabHub';
-import { MateriHub } from './components/materi/MateriHub';
-import { DesmosLab } from './components/desmos/DesmosLab';
-import { AnalyticsDashboard } from './components/analytics/AnalyticsDashboard';
+import { LandingPage } from './components/landing/LandingPage';
 import { ScraperManagerModal } from './components/common/ScraperManagerModal';
 import { AuthModal } from './components/auth/AuthModal';
 import { MistakeReviewModal } from './components/mistakes/MistakeReviewModal';
@@ -19,17 +13,40 @@ import {
   BookOpen, 
   Zap, 
   Calculator, 
-  BarChart3 
+  BarChart3,
+  Loader2
 } from 'lucide-react';
 
-export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('mock');
-  const [isScraperModalOpen, setIsScraperModalOpen] = useState(false);
+// Code-split heavy modules to achieve sub-second initial load time
+const MockTestContainer = lazy(() => import('./components/mock-test/MockTestContainer').then(m => ({ default: m.MockTestContainer })));
+const DrillHub = lazy(() => import('./components/drill/DrillHub').then(m => ({ default: m.DrillHub })));
+const DrillSession = lazy(() => import('./components/drill/DrillSession').then(m => ({ default: m.DrillSession })));
+const VocabHub = lazy(() => import('./components/vocab/VocabHub').then(m => ({ default: m.VocabHub })));
+const MateriHub = lazy(() => import('./components/materi/MateriHub').then(m => ({ default: m.MateriHub })));
+const DesmosLab = lazy(() => import('./components/desmos/DesmosLab').then(m => ({ default: m.DesmosLab })));
+const AnalyticsDashboard = lazy(() => import('./components/analytics/AnalyticsDashboard').then(m => ({ default: m.AnalyticsDashboard })));
 
+const ViewLoadingFallback = () => (
+  <div className="flex-1 flex flex-col items-center justify-center p-8 bg-zinc-950 text-zinc-400 space-y-3">
+    <div className="w-10 h-10 rounded-2xl bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400">
+      <Loader2 className="w-5 h-5 animate-spin" />
+    </div>
+    <div className="text-xs font-semibold text-zinc-300">Memuat Modul Latihan...</div>
+  </div>
+);
+
+export const App: React.FC = () => {
   // Authentication state
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => AuthService.getCurrentUser());
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup'>('signin');
+
+  // Landing page visible if visitor is not logged in
+  const [showLanding, setShowLanding] = useState<boolean>(() => !AuthService.getCurrentUser());
+
+  // Active navigation tab
+  const [activeTab, setActiveTab] = useState<ActiveTab>('mock');
+  const [isScraperModalOpen, setIsScraperModalOpen] = useState(false);
 
   // Drill active state
   const [activeDrillQuestions, setActiveDrillQuestions] = useState<SATQuestion[] | null>(null);
@@ -39,21 +56,28 @@ export const App: React.FC = () => {
   const [isMistakeReviewOpen, setIsMistakeReviewOpen] = useState(false);
   const [selectedMistakeQuestionId, setSelectedMistakeQuestionId] = useState<string | null>(null);
 
-  // Subscribe to real-time auth changes and trigger cloud sync
+  // Prefetch full question bank in background & subscribe to auth state
   useEffect(() => {
+    // 1. Asynchronously load the 2,881+ question bank without blocking first paint
+    StorageService.loadFullQuestionBank().catch(() => {});
+
+    // 2. Real-time Firebase Auth listener
     const unsubscribe = AuthService.initAuthListener(async (user) => {
       setCurrentUser(user);
       if (user) {
+        setShowLanding(false);
         await StorageService.syncFromCloud();
       }
     });
 
     const handleStorageChange = () => {
-      setCurrentUser(AuthService.getCurrentUser());
+      const u = AuthService.getCurrentUser();
+      setCurrentUser(u);
+      if (u) setShowLanding(false);
     };
     window.addEventListener('storage', handleStorageChange);
 
-    // Initial cloud sync if already signed in
+    // 3. Cloud sync if signed in
     const active = AuthService.getCurrentUser();
     if (active) {
       StorageService.syncFromCloud().catch(() => {});
@@ -73,9 +97,9 @@ export const App: React.FC = () => {
   const handleSignOut = async () => {
     await AuthService.signOut();
     setCurrentUser(null);
+    setShowLanding(true);
   };
 
-  // Triggered when user starts a drill from DrillHub
   const handleStartDrill = (questions: SATQuestion[], mode: 'instant' | 'timed') => {
     setActiveDrillQuestions(questions);
     setDrillMode(mode);
@@ -85,13 +109,67 @@ export const App: React.FC = () => {
     setActiveDrillQuestions(null);
   };
 
-  // Switch to analytics from mock test result
   const handleGoToAnalytics = () => {
     setActiveTab('analytics');
+    setShowLanding(false);
   };
 
+  // If visitor is on landing page
+  if (showLanding) {
+    return (
+      <div className="min-h-screen w-screen bg-zinc-950 flex flex-col font-sans overflow-x-hidden">
+        {/* Simplified Header for Landing Page */}
+        <header className="h-16 px-4 sm:px-6 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-800/80 flex items-center justify-between sticky top-0 z-40">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-orange-500 via-amber-500 to-yellow-400 flex items-center justify-center font-black text-zinc-950 text-sm shadow-md shadow-orange-500/20">
+              16
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-base font-black text-white tracking-tight">MoSAT</span>
+              <span className="text-[10px] uppercase font-bold text-orange-400 bg-orange-500/10 border border-orange-500/30 px-1.5 py-0.5 rounded">
+                DSAT16
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              onClick={() => setShowLanding(false)}
+              className="px-3.5 py-1.5 text-xs font-semibold text-zinc-300 hover:text-white transition-colors"
+            >
+              Mode Tamu
+            </button>
+            <button
+              onClick={() => handleOpenAuthModal('signin')}
+              className="px-4 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-zinc-950 font-bold text-xs rounded-xl shadow-md shadow-orange-500/25 transition-transform hover:scale-102"
+            >
+              Masuk / Daftar
+            </button>
+          </div>
+        </header>
+
+        <main className="flex-1">
+          <LandingPage
+            onStartPractice={() => setShowLanding(false)}
+            onOpenAuth={(mode) => handleOpenAuthModal(mode)}
+          />
+        </main>
+
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+          onSuccess={(user) => {
+            setCurrentUser(user);
+            setShowLanding(false);
+          }}
+          initialMode={authModalMode}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-50 font-sans">
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-950 font-sans">
       {/* Top Navbar */}
       <Navbar
         activeTab={activeTab}
@@ -105,56 +183,46 @@ export const App: React.FC = () => {
         onSignOut={handleSignOut}
       />
 
-      {/* Main Views */}
+      {/* Main Views with Lazy Suspense */}
       <main className="flex-1 flex flex-col overflow-hidden relative">
-        {activeTab === 'mock' && (
-          <MockTestContainer
-            onGoToAnalytics={handleGoToAnalytics}
-          />
-        )}
-
-        {activeTab === 'drill' && (
-          activeDrillQuestions ? (
-            <DrillSession
-              questions={activeDrillQuestions}
-              mode={drillMode}
-              onExit={handleExitDrill}
+        <Suspense fallback={<ViewLoadingFallback />}>
+          {activeTab === 'mock' && (
+            <MockTestContainer
+              onGoToAnalytics={handleGoToAnalytics}
             />
-          ) : (
-            <DrillHub
-              onStartDrill={handleStartDrill}
-              onOpenMistakeReview={() => {
-                setSelectedMistakeQuestionId(null);
-                setIsMistakeReviewOpen(true);
-              }}
+          )}
+
+          {activeTab === 'drill' && (
+            activeDrillQuestions ? (
+              <DrillSession
+                questions={activeDrillQuestions}
+                mode={drillMode}
+                onExit={handleExitDrill}
+              />
+            ) : (
+              <DrillHub
+                onStartDrill={handleStartDrill}
+                onOpenMistakeReview={() => setIsMistakeReviewOpen(true)}
+              />
+            )
+          )}
+
+          {activeTab === 'vocab' && <VocabHub />}
+
+          {activeTab === 'materi' && <MateriHub />}
+
+          {activeTab === 'desmos' && <DesmosLab />}
+
+          {activeTab === 'analytics' && (
+            <AnalyticsDashboard
+              onStartTargetedDrill={(qs) => handleStartDrill(qs, 'instant')}
             />
-          )
-        )}
-
-        {activeTab === 'vocab' && (
-          <VocabHub />
-        )}
-
-        {activeTab === 'materi' && (
-          <MateriHub />
-        )}
-
-        {activeTab === 'desmos' && (
-          <DesmosLab />
-        )}
-
-        {activeTab === 'analytics' && (
-          <AnalyticsDashboard
-            onStartTargetedDrill={(qs) => {
-              setActiveTab('drill');
-              handleStartDrill(qs, 'instant');
-            }}
-          />
-        )}
+          )}
+        </Suspense>
       </main>
 
-      {/* Mobile Bottom Navigation Bar - DSAT16 Yellow-Orange Theme */}
-      <div className="md:hidden bg-zinc-950 border-t border-zinc-800 px-3 py-2 flex items-center justify-around text-zinc-400 z-30 shrink-0">
+      {/* Mobile Bottom Navigation */}
+      <div className="md:hidden flex items-center justify-around py-2.5 px-2 bg-zinc-950/95 border-t border-zinc-800 text-zinc-400 shrink-0 z-30">
         <button
           onClick={() => { setActiveTab('mock'); setActiveDrillQuestions(null); }}
           className={`flex flex-col items-center gap-1 text-[10px] font-semibold transition-colors ${
@@ -221,7 +289,7 @@ export const App: React.FC = () => {
         isOpen={isScraperModalOpen}
         onClose={() => setIsScraperModalOpen(false)}
         onQuestionsUpdated={() => {
-          // Trigger refresh
+          // Trigger state refresh
         }}
       />
 
@@ -231,6 +299,7 @@ export const App: React.FC = () => {
         onClose={() => setIsAuthModalOpen(false)}
         onSuccess={(user) => {
           setCurrentUser(user);
+          setShowLanding(false);
         }}
         initialMode={authModalMode}
       />

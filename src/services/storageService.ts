@@ -8,7 +8,6 @@ import {
 } from '../types/sat';
 import { AuthService } from './authService';
 import { SEED_QUESTIONS } from '../data/questionsSeed';
-import scraped1000Questions from '../data/scraped1000.json';
 import { db } from './firebase';
 import { doc, setDoc, getDocs, collection, serverTimestamp } from 'firebase/firestore';
 
@@ -25,18 +24,16 @@ export class StorageService {
   static getProfile(): UserProfile {
     const user = AuthService.getCurrentUser();
     const defaultProfile: UserProfile = {
-      name: user ? user.name : 'SAT Scholar',
+      name: user ? user.name : 'Tamu (Guest)',
       targetScore: user ? user.targetScore : 1550,
-      streak: 5,
+      streak: 0,
       lastActiveDate: new Date().toISOString().split('T')[0],
       dailyGoal: 20,
-      todayAnsweredCount: 12,
-      totalAnswered: 68,
-      totalCorrect: 59,
+      todayAnsweredCount: 0,
+      totalAnswered: 0,
+      totalCorrect: 0,
       favoriteQuestionIds: [],
-      activityHistory: {
-        [new Date().toISOString().split('T')[0]]: 12
-      }
+      activityHistory: {}
     };
 
     try {
@@ -246,32 +243,7 @@ export class StorageService {
   static getMockTestHistory(): MockTestAttempt[] {
     try {
       const raw = localStorage.getItem(this.key('mock_tests'));
-      if (!raw) {
-        const sample: MockTestAttempt[] = [
-          {
-            id: 'mock-sample-1',
-            date: new Date(Date.now() - 2 * 86400000).toISOString().split('T')[0],
-            totalScore: 1520,
-            rwScore: 740,
-            mathScore: 780,
-            percentile: 98,
-            rwModule1Correct: 25,
-            rwModule1Total: 27,
-            rwModule2Correct: 24,
-            rwModule2Total: 27,
-            rwModule2Difficulty: 'Hard',
-            mathModule1Correct: 22,
-            mathModule1Total: 22,
-            mathModule2Correct: 21,
-            mathModule2Total: 22,
-            mathModule2Difficulty: 'Hard',
-            totalTimeSeconds: 4200,
-            answers: {}
-          }
-        ];
-        this.saveMockTestHistory(sample);
-        return sample;
-      }
+      if (!raw) return [];
       return JSON.parse(raw);
     } catch {
       return [];
@@ -339,19 +311,48 @@ export class StorageService {
     }
   }
 
-  // Questions Database
+  // Asynchronous Questions Database with Memory Cache
+  private static fullBankLoaded = false;
+  private static questionCache: SATQuestion[] = [];
+  private static loadingPromise: Promise<SATQuestion[]> | null = null;
+
+  static async loadFullQuestionBank(): Promise<SATQuestion[]> {
+    if (this.fullBankLoaded && this.questionCache.length > 0) {
+      return this.getAllQuestions();
+    }
+    if (this.loadingPromise) {
+      return this.loadingPromise;
+    }
+
+    this.loadingPromise = (async () => {
+      try {
+        const res = await fetch('/sat_questions_1000.json');
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            this.questionCache = data;
+            this.fullBankLoaded = true;
+          }
+        }
+      } catch (err) {
+        console.warn('[MoSAT] Question bank fetch notice:', err);
+      }
+      return this.getAllQuestions();
+    })();
+
+    return this.loadingPromise;
+  }
+
   static getAllQuestions(): SATQuestion[] {
-    const scrapedList = (scraped1000Questions as any[]) || [];
     const customImported = this.getCustomQuestions();
-    
     const questionMap = new Map<string, SATQuestion>();
 
     for (const q of SEED_QUESTIONS) {
       questionMap.set(q.id, q);
     }
-    for (const q of scrapedList) {
+    for (const q of this.questionCache) {
       if (q && q.id) {
-        questionMap.set(q.id, q as SATQuestion);
+        questionMap.set(q.id, q);
       }
     }
     for (const q of customImported) {

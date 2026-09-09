@@ -79,13 +79,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  const handleUseDemo = async () => {
-    setEmail('ilyas@dsat16.id');
-    setPassword('sat1600');
-    setMode('signin');
-    setError(null);
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-zinc-950/70 backdrop-blur-md animate-in fade-in duration-150">
       <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full border border-orange-100 overflow-hidden animate-in zoom-in-95">
@@ -291,18 +284,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </>
               )}
             </button>
-
-            {/* Demo account quick login helper */}
-            <div className="pt-2 text-center">
-              <button
-                type="button"
-                disabled={isLoading}
-                onClick={handleUseDemo}
-                className="text-[11px] text-orange-600 hover:text-orange-700 font-medium hover:underline"
-              >
-                Gunakan Akun Percobaan (Demo Account)
-              </button>
-            </div>
           </form>
         </div>
       </div>
