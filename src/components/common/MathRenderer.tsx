@@ -8,16 +8,34 @@ interface MathRendererProps {
 }
 
 /**
- * Escapes currency dollar signs (e.g. "$200,000", "$15 entry", "$31.78") 
- * so they don't break KaTeX math formulas or cause LaTeX leakage.
+ * English prose stop words that indicate text between dollar signs is prose (e.g. currency amounts)
+ * rather than a genuine College Board math formula.
  */
-function escapeCurrency(text: string): string {
-  if (!text) return '';
-  // Currency with words or punctuation after: $200,000 in, $15 entry, $300 to
-  let res = text.replace(/\$(\d[\d,]*(?:\.\d+)?)(?=\s+[a-zA-Z]|\s*$|\.\s*<|\.$)/g, '&#36;$1');
-  // Standalone price inside paragraph: <p>$31.78.</p>
-  res = res.replace(/(<[a-z]+[^>]*>)\$(\d[\d,]*(?:\.\d+)?)\.?(<\/[a-z]+>)/gi, '$1&#36;$2.$3');
-  return res;
+const PROSE_STOPWORDS = new Set([
+  'the', 'that', 'this', 'these', 'those', 'with', 'from', 'about', 'between',
+  'after', 'before', 'during', 'through', 'would', 'could', 'should', 'their',
+  'which', 'where', 'whose', 'there', 'because', 'contest', 'award',
+  'sponsored', 'commission', 'individual', 'billion', 'today', 'entry', 'fee',
+  'visitor', 'destination', 'preserve', 'national', 'park', 'tulips', 'amsterdam',
+  'selling', 'equivalent', 'money', 'participants', 'reported', 'survey',
+  'sample', 'population', 'study', 'researchers', 'sold', 'bought', 'were',
+  'have', 'been', 'will', 'what', 'when', 'some', 'many', 'other', 'another',
+  'such', 'into'
+]);
+
+function isMathBlock(candidate: string): boolean {
+  if (!candidate || candidate.trim().length === 0) return false;
+  // 1. If it contains HTML tags, it's not inline math
+  if (/<[a-z]+[^>]*>/i.test(candidate)) return false;
+  // 2. If it spans sentence boundaries (e.g. '. CapitalLetter')
+  if (/\.\s+[A-Z]/.test(candidate)) return false;
+  // 3. Check for prose stop words
+  const words = candidate.toLowerCase().split(/\s+/);
+  for (const raw of words) {
+    const w = raw.replace(/[^a-z]/g, '');
+    if (PROSE_STOPWORDS.has(w)) return false;
+  }
+  return true;
 }
 
 /**
@@ -70,8 +88,17 @@ function cleanVerbalMath(text: string): string {
   // Superscript followed by token or simple expression
   res = res.replace(/Superscript\s+([a-zA-Z0-9\+\-\.\/]+)/gi, '^{$1}');
 
+  // Subscripts with Baseline & simple expressions
+  res = res.replace(/Subscript\s+(.*?)\s+Baseline/gi, '_{$1}');
+  res = res.replace(/Subscript\s+([a-zA-Z0-9\+\-\.\/]+)/gi, '_{$1}');
+
   // Clean any remaining "Baseline"
   res = res.replace(/\bBaseline\b/gi, '');
+
+  // Geometry: line segment upper A upper B -> \overline{AB}
+  res = res.replace(/line\s+segment\s+upper\s+([a-zA-Z])\s+upper\s+([a-zA-Z])/gi, '\\overline{$1$2}');
+  res = res.replace(/line\s+segment\s+([a-zA-Z])\s+([a-zA-Z])/gi, '\\overline{$1$2}');
+  res = res.replace(/\bupper\s+([a-zA-Z])\b/gi, '$1');
 
   // 6. Common English verbal fractions
   const FRACTIONS: [RegExp, string][] = [
@@ -117,10 +144,10 @@ function cleanVerbalMath(text: string): string {
 
   // 7. Verbal math symbols, units, and words
   const SYMBOL_REPLACEMENTS: [RegExp, string][] = [
-    [/\bleft parenthesis\b/gi, '('],
-    [/\bright parenthesis\b/gi, ')'],
-    [/\bleft bracket\b/gi, '['],
-    [/\bright bracket\b/gi, ']'],
+    [/\bleft\s+parenthesis\b\s*/gi, '('],
+    [/\s*\bright\s+parenthesis\b/gi, ')'],
+    [/\bleft\s+bracket\b\s*/gi, '['],
+    [/\s*\bright\s+bracket\b/gi, ']'],
     [/\bequals\b/gi, '='],
     [/\bplus or minus\b/gi, '\\pm '],
     [/\bplus\b/gi, '+'],
@@ -174,11 +201,11 @@ export const MathRenderer: React.FC<MathRendererProps> = ({ content, className =
   const renderedHtml = useMemo(() => {
     if (!content) return '';
 
-    // Step 1: Escape standalone currency amounts to prevent LaTeX leaks
-    const safeContent = escapeCurrency(content);
-
-    // Step 2: Handle $$...$$ display math
-    let formatted = safeContent.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
+    // Step 1: Handle $$...$$ display math
+    let formatted = content.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
+      if (!isMathBlock(math)) {
+        return `&#36;&#36;${math}&#36;&#36;`;
+      }
       const clean = cleanVerbalMath(math);
       try {
         return katex.renderToString(clean, { displayMode: true, throwOnError: false });
@@ -187,8 +214,11 @@ export const MathRenderer: React.FC<MathRendererProps> = ({ content, className =
       }
     });
 
-    // Step 3: Handle $...$ inline math
+    // Step 2: Handle $...$ inline math
     formatted = formatted.replace(/\$([^\$\n]+?)\$/g, (_, math) => {
+      if (!isMathBlock(math)) {
+        return `&#36;${math}&#36;`;
+      }
       const clean = cleanVerbalMath(math);
       try {
         return katex.renderToString(clean, { displayMode: false, throwOnError: false });
