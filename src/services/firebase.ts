@@ -1,15 +1,17 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
+import { getAnalytics, isSupported, Analytics } from 'firebase/analytics';
 
 // Configuration for Firebase project mosat-5dc4f
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyAeXdzV99ibgcq4L0NVvomqs0111wvplC0',
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'mosat-5dc4f.firebaseapp.com',
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'mosat-5dc4f',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'mosat-5dc4f.appspot.com',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || ''
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'mosat-5dc4f.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '759900234492',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:759900234492:web:23ec80cc5fc3d84f072d79',
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || 'G-XXLYKX52DF'
 };
 
 // Check if Firebase has a valid, non-placeholder API key
@@ -24,6 +26,7 @@ export const isFirebaseConfigured = Boolean(
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
 let db: Firestore | null = null;
+let analytics: Analytics | null = null;
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
@@ -32,9 +35,17 @@ try {
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     auth = getAuth(app);
     db = getFirestore(app);
+
+    if (typeof window !== 'undefined') {
+      isSupported().then(supported => {
+        if (supported && app) {
+          analytics = getAnalytics(app);
+        }
+      }).catch(() => {});
+    }
   }
 } catch (err) {
   console.warn('[MoSAT Firebase] Initialization fallback to local storage:', err);
 }
 
-export { app, auth, db, googleProvider, firebaseConfig };
+export { app, auth, db, analytics, googleProvider, firebaseConfig };
