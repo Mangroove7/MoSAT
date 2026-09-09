@@ -57,3 +57,61 @@
   border-radius: 2px;
   padding: 1px 2px;
 }
+
+/* Official College Board SAT Table & Grid Formatting */
+.math-rendered-content figure.table,
+.sat-passage figure.table {
+  display: flex;
+  justify-content: center;
+  margin: 1.25rem 0;
+  width: 100%;
+}
+
+.math-rendered-content table,
+.sat-passage table {
+  width: auto !important;
+  min-width: 240px;
+  max-width: 100%;
+  margin: 1rem auto;
+  border-collapse: collapse !important;
+  border: 1.5px solid #475569 !important;
+  background-color: #ffffff;
+  font-size: 0.875rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.math-rendered-content caption,
+.sat-passage caption {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #334155;
+  padding-bottom: 0.5rem;
+  text-align: center;
+}
+
+.math-rendered-content th,
+.sat-passage th {
+  border: 1px solid #64748b !important;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+  font-weight: 700 !important;
+  padding: 8px 18px !important;
+  text-align: center !important;
+  white-space: nowrap;
+}
+
+.math-rendered-content td,
+.sat-passage td {
+  border: 1px solid #94a3b8 !important;
+  padding: 8px 18px !important;
+  text-align: center !important;
+  color: #1e293b !important;
+  white-space: nowrap !important;
+}
+
+.math-rendered-content tr:nth-child(even) td,
+.sat-passage tr:nth-child(even) td {
+  background-color: #f8fafc;
+}

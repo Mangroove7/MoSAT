@@ -463,18 +463,22 @@ export class StorageService {
     const customImported = this.getCustomQuestions();
     const questionMap = new Map<string, SATQuestion>();
 
-    for (const q of SEED_QUESTIONS) {
-      questionMap.set(q.id, q);
-    }
-    for (const q of this.questionCache) {
-      if (q && q.id) {
+    const addValid = (q: SATQuestion) => {
+      if (q && q.id && q.stem && q.stem.trim().length > 0) {
         questionMap.set(q.id, q);
+      }
+    };
+
+    for (const q of this.questionCache) {
+      addValid(q);
+    }
+    for (const q of SEED_QUESTIONS) {
+      if (!questionMap.has(q.id)) {
+        addValid(q);
       }
     }
     for (const q of customImported) {
-      if (q && q.id) {
-        questionMap.set(q.id, q);
-      }
+      addValid(q);
     }
 
     return Array.from(questionMap.values());
