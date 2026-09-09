@@ -1,0 +1,36 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Environments
+.env
+.env*.local
+*.local
+
+# Python cache & raw scraping dumps
+__pycache__/
+*.pyc
+scraped_questions.json
+scraped_questions_1000.json
+scraped_questions_all.json
