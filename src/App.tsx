@@ -4,6 +4,8 @@ import { LandingPage } from './components/landing/LandingPage';
 import { ScraperManagerModal } from './components/common/ScraperManagerModal';
 import { AuthModal } from './components/auth/AuthModal';
 import { MistakeReviewModal } from './components/mistakes/MistakeReviewModal';
+import { EditProfileModal } from './components/profile/EditProfileModal';
+import { OnboardingModal } from './components/auth/OnboardingModal';
 import { AuthService, AuthUser } from './services/authService';
 import { StorageService } from './services/storageService';
 import { SATQuestion } from './types/sat';
@@ -55,6 +57,10 @@ export const App: React.FC = () => {
   // Mistake Review modal state
   const [isMistakeReviewOpen, setIsMistakeReviewOpen] = useState(false);
   const [selectedMistakeQuestionId, setSelectedMistakeQuestionId] = useState<string | null>(null);
+
+  // Edit Profile & Onboarding states
+  const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
 
   // Prefetch full question bank in background & subscribe to auth state
   useEffect(() => {
@@ -180,6 +186,7 @@ export const App: React.FC = () => {
         onOpenScraperModal={() => setIsScraperModalOpen(true)}
         currentUser={currentUser}
         onOpenAuthModal={handleOpenAuthModal}
+        onOpenEditProfile={() => setIsEditProfileOpen(true)}
         onSignOut={handleSignOut}
       />
 
@@ -300,6 +307,10 @@ export const App: React.FC = () => {
         onSuccess={(user) => {
           setCurrentUser(user);
           setShowLanding(false);
+          const prof = StorageService.getProfile();
+          if (!prof.onboardingCompleted) {
+            setIsOnboardingOpen(true);
+          }
         }}
         initialMode={authModalMode}
       />
@@ -309,6 +320,24 @@ export const App: React.FC = () => {
         isOpen={isMistakeReviewOpen}
         initialQuestionId={selectedMistakeQuestionId}
         onClose={() => setIsMistakeReviewOpen(false)}
+      />
+
+      {/* Edit Profile & SAT Target Modal */}
+      <EditProfileModal
+        isOpen={isEditProfileOpen}
+        onClose={() => setIsEditProfileOpen(false)}
+        onProfileUpdated={() => {
+          setCurrentUser(AuthService.getCurrentUser());
+        }}
+      />
+
+      {/* Onboarding Diagnostic & Study Pace Setup Modal */}
+      <OnboardingModal
+        isOpen={isOnboardingOpen}
+        onComplete={() => {
+          setIsOnboardingOpen(false);
+          setCurrentUser(AuthService.getCurrentUser());
+        }}
       />
     </div>
   );

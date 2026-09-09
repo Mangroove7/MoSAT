@@ -16,7 +16,7 @@ import { BreakScreen } from './BreakScreen';
 import { TestResultView } from './TestResultView';
 import { DesmosModal } from '../common/DesmosModal';
 import { ReferenceSheetModal } from '../common/ReferenceSheetModal';
-import { Play, Sparkles, BookOpen, Clock, ShieldCheck, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Play, Sparkles, BookOpen, Clock, ShieldCheck, ChevronRight, ChevronLeft, Target } from 'lucide-react';
 
 type TestStage = 
   | 'intro'
@@ -29,6 +29,8 @@ type TestStage =
   | 'math_m1_review' 
   | 'math_m2' 
   | 'math_m2_review' 
+  | 'pre_test'
+  | 'pre_test_review'
   | 'result';
 
 interface MockTestContainerProps {
@@ -37,7 +39,7 @@ interface MockTestContainerProps {
 
 export const MockTestContainer: React.FC<MockTestContainerProps> = ({ onGoToAnalytics }) => {
   const [stage, setStage] = useState<TestStage>('intro');
-  const [testMode, setTestMode] = useState<'full' | 'rw_only' | 'math_only'>('full');
+  const [testMode, setTestMode] = useState<'full' | 'rw_only' | 'math_only' | 'pre_test'>('pre_test');
 
   // Question navigation
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -66,6 +68,12 @@ export const MockTestContainer: React.FC<MockTestContainerProps> = ({ onGoToAnal
   const allQuestions = useMemo(() => StorageService.getAllQuestions(), []);
 
   // Split into sets for modules
+  const preTestQuestions = useMemo(() => {
+    const rw = allQuestions.filter(q => q.section === 'Reading and Writing');
+    const math = allQuestions.filter(q => q.section === 'Math');
+    return [...rw.slice(0, 10), ...math.slice(0, 10)];
+  }, [allQuestions]);
+
   const { rwQuestionsM1, rwQuestionsM2Hard, rwQuestionsM2Easy, mathQuestionsM1, mathQuestionsM2Hard, mathQuestionsM2Easy } = useMemo(() => {
     const rw = allQuestions.filter(q => q.section === 'Reading and Writing');
     const math = allQuestions.filter(q => q.section === 'Math');
@@ -104,6 +112,9 @@ export const MockTestContainer: React.FC<MockTestContainerProps> = ({ onGoToAnal
       case 'math_m2':
       case 'math_m2_review':
         return mathM2Difficulty === 'Hard' ? mathQuestionsM2Hard : mathQuestionsM2Easy;
+      case 'pre_test':
+      case 'pre_test_review':
+        return preTestQuestions;
       default:
         return [];
     }
@@ -123,11 +134,59 @@ export const MockTestContainer: React.FC<MockTestContainerProps> = ({ onGoToAnal
   const startTest = () => {
     resetModuleState();
     setUserAnswers({});
-    if (testMode === 'math_only') {
+    if (testMode === 'pre_test') {
+      setStage('pre_test');
+    } else if (testMode === 'math_only') {
       setStage('math_m1');
     } else {
       setStage('rw_m1');
     }
+  };
+
+  // Submit Pre-Test
+  const handleSubmitPreTest = () => {
+    let rwCorrect = 0;
+    let mathCorrect = 0;
+
+    preTestQuestions.forEach((q, idx) => {
+      const isCorrect = userAnswers[q.id]?.trim().toLowerCase() === q.correctAnswer.trim().toLowerCase();
+      if (idx < 10) {
+        if (isCorrect) rwCorrect++;
+      } else {
+        if (isCorrect) mathCorrect++;
+      }
+    });
+
+    const rwScore = Math.min(800, Math.max(200, 200 + Math.round((rwCorrect / 10) * 600)));
+    const mathScore = Math.min(800, Math.max(200, 200 + Math.round((mathCorrect / 10) * 600)));
+    const totalScore = rwScore + mathScore;
+
+    // Save baseline score to user profile
+    StorageService.savePreTestResult(totalScore, rwScore, mathScore);
+
+    const rwRes: SectionScoreResult = {
+      score: rwScore,
+      module1Correct: rwCorrect,
+      module1Total: 10,
+      module2Difficulty: 'Hard',
+      module2Correct: rwCorrect,
+      module2Total: 10,
+      totalCorrect: rwCorrect,
+      totalQuestions: 10
+    };
+
+    const mathRes: SectionScoreResult = {
+      score: mathScore,
+      module1Correct: mathCorrect,
+      module1Total: 10,
+      module2Difficulty: 'Hard',
+      module2Correct: mathCorrect,
+      module2Total: 10,
+      totalCorrect: mathCorrect,
+      totalQuestions: 10
+    };
+
+    finishTest(rwRes, mathRes);
   };
 
   // Submit RW Module 1
@@ -320,55 +379,126 @@ export const MockTestContainer: React.FC<MockTestContainerProps> = ({ onGoToAnal
             </p>
           </div>
 
+          {/* Tujuan SAT & Target Milestone Tracker */}
+          {(() => {
+            const prof = StorageService.getProfile();
+            const hasBaseline = prof.baselineScore && prof.baselineScore > 0;
+            const diff = hasBaseline ? prof.targetScore - prof.baselineScore! : 0;
+            return (
+              <div className="bg-gradient-to-r from-orange-500/10 via-amber-500/10 to-orange-500/10 p-5 rounded-2xl border border-orange-500/30 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-orange-600 flex items-center gap-1.5">
+                      <Target className="w-4 h-4" />
+                      Tujuan SAT & Status Target Anda
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-zinc-500 font-medium">
+                    Jadwal: <span className="font-bold text-zinc-800">{prof.targetExamDate || '3-4 bulan'}</span>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-white/80 p-2.5 rounded-xl border border-orange-100">
+                    <span className="text-[10px] text-zinc-400 font-semibold block">Skor Baseline Awal</span>
+                    <span className="text-base font-black text-zinc-900 font-mono">
+                      {hasBaseline ? prof.baselineScore : 'Belum Ada'}
+                    </span>
+                  </div>
+                  <div className="bg-white/80 p-2.5 rounded-xl border border-orange-100">
+                    <span className="text-[10px] text-orange-600 font-semibold block">Target Skor Akhir</span>
+                    <span className="text-base font-black text-orange-600 font-mono">
+                      {prof.targetScore}
+                    </span>
+                  </div>
+                  <div className="bg-white/80 p-2.5 rounded-xl border border-orange-100">
+                    <span className="text-[10px] text-zinc-400 font-semibold block">Selisih Poin</span>
+                    <span className="text-base font-black font-mono text-amber-600">
+                      {hasBaseline ? `+${Math.max(0, diff)}` : 'Ambil Pre-Test'}
+                    </span>
+                  </div>
+                </div>
+
+                {!hasBaseline && (
+                  <p className="text-[11px] text-amber-800 bg-amber-50/80 p-2 rounded-lg border border-amber-200">
+                    💡 <strong>Rekomendasi:</strong> Mulai dengan <strong>Pre-Test Diagnostik (20 Soal)</strong> di bawah untuk mengukur skor awal Anda sebelum simulasi penuh.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
           {/* Test Mode Selector */}
           <div className="space-y-3">
             <label className="block text-xs font-bold uppercase tracking-wider text-zinc-600">
               Pilih Paket Simulasi:
             </label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Option 1: Pre-Test */}
+              <button
+                onClick={() => setTestMode('pre_test')}
+                className={`p-4 rounded-2xl border text-left transition-all ${
+                  testMode === 'pre_test'
+                    ? 'border-orange-500 bg-orange-50/80 ring-2 ring-orange-500/30 shadow-sm'
+                    : 'border-zinc-200 hover:border-zinc-300 bg-zinc-50/50'
+                }`}
+              >
+                <div className="font-bold text-sm text-zinc-900 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-amber-500" />
+                    <span>Pre-Test Diagnostik</span>
+                  </span>
+                  <span className="text-[10px] font-mono bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold">25 Menit</span>
+                </div>
+                <div className="text-[11px] text-zinc-500 mt-1">20 Soal (10 RW + 10 Math) untuk menentukan skor baseline awal.</div>
+              </button>
+
+              {/* Option 2: Full Test */}
               <button
                 onClick={() => setTestMode('full')}
                 className={`p-4 rounded-2xl border text-left transition-all ${
                   testMode === 'full'
-                    ? 'border-orange-500 bg-orange-50/70 ring-2 ring-orange-500/30 shadow-sm'
+                    ? 'border-orange-500 bg-orange-50/80 ring-2 ring-orange-500/30 shadow-sm'
                     : 'border-zinc-200 hover:border-zinc-300 bg-zinc-50/50'
                 }`}
               >
                 <div className="font-bold text-sm text-zinc-900 flex items-center justify-between">
-                  <span>Full Test</span>
-                  <span className="text-[10px] font-mono bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded font-bold">1600</span>
+                  <span>Simulasi Penuh Adaptif</span>
+                  <span className="text-[10px] font-mono bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded font-bold">134 Menit</span>
                 </div>
-                <div className="text-[11px] text-zinc-500 mt-1">RW + Math (Adaptif) + Break 10 Menit</div>
+                <div className="text-[11px] text-zinc-500 mt-1">Format Bluebook resmi: 2 Modul RW + 2 Modul Math adaptif.</div>
               </button>
 
+              {/* Option 3: RW Only */}
               <button
                 onClick={() => setTestMode('rw_only')}
                 className={`p-4 rounded-2xl border text-left transition-all ${
                   testMode === 'rw_only'
-                    ? 'border-orange-500 bg-orange-50/70 ring-2 ring-orange-500/30 shadow-sm'
+                    ? 'border-orange-500 bg-orange-50/80 ring-2 ring-orange-500/30 shadow-sm'
                     : 'border-zinc-200 hover:border-zinc-300 bg-zinc-50/50'
                 }`}
               >
                 <div className="font-bold text-sm text-zinc-900 flex items-center justify-between">
-                  <span>R&W Only</span>
-                  <span className="text-[10px] font-mono bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded font-bold">800</span>
+                  <span>Reading & Writing Saja</span>
+                  <span className="text-[10px] font-mono bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded font-bold">64 Menit</span>
                 </div>
-                <div className="text-[11px] text-zinc-500 mt-1">2 Modul Reading & Writing Adaptif</div>
+                <div className="text-[11px] text-zinc-500 mt-1">2 Modul Reading & Writing adaptif (Skor 200–800).</div>
               </button>
 
+              {/* Option 4: Math Only */}
               <button
                 onClick={() => setTestMode('math_only')}
                 className={`p-4 rounded-2xl border text-left transition-all ${
                   testMode === 'math_only'
-                    ? 'border-orange-500 bg-orange-50/70 ring-2 ring-orange-500/30 shadow-sm'
+                    ? 'border-orange-500 bg-orange-50/80 ring-2 ring-orange-500/30 shadow-sm'
                     : 'border-zinc-200 hover:border-zinc-300 bg-zinc-50/50'
                 }`}
               >
                 <div className="font-bold text-sm text-zinc-900 flex items-center justify-between">
-                  <span>Math Only</span>
-                  <span className="text-[10px] font-mono bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded font-bold">800</span>
+                  <span>Math Saja + Desmos</span>
+                  <span className="text-[10px] font-mono bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded font-bold">70 Menit</span>
                 </div>
-                <div className="text-[11px] text-zinc-500 mt-1">2 Modul Math + Desmos API Resmi</div>
+                <div className="text-[11px] text-zinc-500 mt-1">2 Modul Math adaptif + kalkulator Desmos (Skor 200–800).</div>
               </button>
             </div>
           </div>
@@ -522,7 +652,8 @@ export const MockTestContainer: React.FC<MockTestContainerProps> = ({ onGoToAnal
       setCurrentIndex(currentIndex + 1);
     } else {
       // Go to Review Screen
-      if (stage === 'rw_m1') setStage('rw_m1_review');
+      if (stage === 'pre_test') setStage('pre_test_review');
+      else if (stage === 'rw_m1') setStage('rw_m1_review');
       else if (stage === 'rw_m2') setStage('rw_m2_review');
       else if (stage === 'math_m1') setStage('math_m1_review');
       else if (stage === 'math_m2') setStage('math_m2_review');

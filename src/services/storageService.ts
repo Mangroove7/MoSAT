@@ -85,6 +85,33 @@ export class StorageService {
     }
   }
 
+  static updateProfile(updates: Partial<UserProfile>): UserProfile {
+    const current = this.getProfile();
+    const updated: UserProfile = {
+      ...current,
+      ...updates
+    };
+    this.saveProfile(updated);
+
+    if (updates.targetScore) {
+      AuthService.updateTargetScore(updates.targetScore);
+    }
+    return updated;
+  }
+
+  static savePreTestResult(score: number, rwScore: number, mathScore: number): UserProfile {
+    return this.updateProfile({
+      baselineScore: score,
+      preTestCompleted: true,
+      preTestDetails: {
+        date: new Date().toISOString().split('T')[0],
+        score,
+        rwScore,
+        mathScore
+      }
+    });
+  }
+
   static recordQuestionAnswered(questionId: string, isCorrect: boolean): void {
     const profile = this.getProfile();
     const today = new Date().toISOString().split('T')[0];

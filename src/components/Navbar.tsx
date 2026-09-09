@@ -27,6 +27,7 @@ interface NavbarProps {
   onOpenScraperModal: () => void;
   currentUser: AuthUser | null;
   onOpenAuthModal: (mode: 'signin' | 'signup') => void;
+  onOpenEditProfile: () => void;
   onSignOut: () => void;
 }
 
@@ -36,6 +37,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenScraperModal,
   currentUser,
   onOpenAuthModal,
+  onOpenEditProfile,
   onSignOut
 }) => {
   const profile = StorageService.getProfile();
@@ -221,6 +223,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
 
                 <div className="p-1 space-y-0.5">
+                  <button
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
+                      onOpenEditProfile();
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-zinc-800 hover:text-white transition-colors flex items-center gap-2 font-medium text-amber-400"
+                  >
+                    <User className="w-3.5 h-3.5" />
+                    <span>Edit Profil & Target SAT</span>
+                  </button>
+
                   <button
                     onClick={() => {
                       onSelectTab('analytics');

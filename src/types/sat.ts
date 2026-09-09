@@ -111,12 +111,24 @@ export interface MockTestAttempt {
 export interface UserProfile {
   name: string;
   targetScore: number;
+  baselineScore?: number | null;
+  targetExamDate?: string; // e.g. "Nov 2026" or "2026-11"
+  studyPace?: 'steady' | 'balanced' | 'intensive';
+  focusArea?: 'both' | 'math' | 'rw';
+  dailyGoal: number; // questions per day
   streak: number;
   lastActiveDate: string;
-  dailyGoal: number; // questions per day
   todayAnsweredCount: number;
   totalAnswered: number;
   totalCorrect: number;
   favoriteQuestionIds: string[];
   activityHistory: Record<string, number>; // "YYYY-MM-DD": questionCount
+  onboardingCompleted?: boolean;
+  preTestCompleted?: boolean;
+  preTestDetails?: {
+    date: string;
+    score: number;
+    rwScore: number;
+    mathScore: number;
+  };
 }

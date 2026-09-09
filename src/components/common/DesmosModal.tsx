@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { 
   X, 
   Minus, 
@@ -7,7 +7,7 @@ import {
   RotateCcw, 
   Sparkles, 
   BookOpen, 
-  GripHorizontal
+  GripHorizontal 
 } from 'lucide-react';
 
 interface DesmosModalProps {
@@ -26,26 +26,26 @@ export const DesmosModal: React.FC<DesmosModalProps> = ({ isOpen, onClose, initi
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<'calc' | 'presets'>('calc');
 
-  // Coordinates for dragging (default: placed on upper-right quadrant)
+  // Coordinates for dragging
   const [position, setPosition] = useState<{ x: number; y: number }>(() => {
     const defaultX = typeof window !== 'undefined' ? Math.max(20, window.innerWidth - 560) : 100;
     const defaultY = 65;
     return { x: defaultX, y: defaultY };
   });
 
-  const [isDragging, setIsDragging] = useState(false);
+  const isDraggingRef = useRef(false);
   const dragStartRef = useRef<{ startX: number; startY: number; initialPosX: number; initialPosY: number }>({
     startX: 0,
     startY: 0,
     initialPosX: 0,
     initialPosY: 0
   });
+  const currentPosRef = useRef(position);
+  currentPosRef.current = position;
 
-  // Initialize Desmos Calculator
+  // Initialize Desmos Calculator IMMEDIATELY upon mount (Persistent instance)
   useEffect(() => {
-    if (!isOpen) return;
-
-    const timer = setTimeout(() => {
+    const initCalc = () => {
       if (containerRef.current && window.Desmos && !calculatorRef.current) {
         calculatorRef.current = window.Desmos.GraphingCalculator(containerRef.current, {
           keypad: true,
@@ -60,13 +60,31 @@ export const DesmosModal: React.FC<DesmosModalProps> = ({ isOpen, onClose, initi
         if (initialPreset) {
           applyPreset(initialPreset);
         }
-      } else if (calculatorRef.current) {
-        calculatorRef.current.resize();
       }
-    }, 150);
+    };
 
-    return () => clearTimeout(timer);
-  }, [isOpen, initialPreset, isMinimized, isExpanded]);
+    if (window.Desmos) {
+      initCalc();
+    } else {
+      const checkTimer = setInterval(() => {
+        if (window.Desmos) {
+          initCalc();
+          clearInterval(checkTimer);
+        }
+      }, 50);
+      return () => clearInterval(checkTimer);
+    }
+  }, []);
+
+  // When isOpen or size changes, trigger instant resize
+  useEffect(() => {
+    if (isOpen && calculatorRef.current) {
+      // 0ms instant resize
+      requestAnimationFrame(() => {
+        calculatorRef.current?.resize();
+      });
+    }
+  }, [isOpen, isMinimized, isExpanded, activeTab]);
 
   // Clean up on unmount
   useEffect(() => {
@@ -78,44 +96,51 @@ export const DesmosModal: React.FC<DesmosModalProps> = ({ isOpen, onClose, initi
     };
   }, []);
 
-  // Handle Dragging
-  const handlePointerDown = (e: React.PointerEvent) => {
+  // Hardware-accelerated GPU Dragging without React re-render lag
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('input')) {
       return;
     }
-    setIsDragging(true);
+    isDraggingRef.current = true;
     dragStartRef.current = {
       startX: e.clientX,
       startY: e.clientY,
-      initialPosX: position.x,
-      initialPosY: position.y
+      initialPosX: currentPosRef.current.x,
+      initialPosY: currentPosRef.current.y
     };
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  };
+  }, []);
 
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDragging) return;
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!isDraggingRef.current || !windowRef.current) return;
     const deltaX = e.clientX - dragStartRef.current.startX;
     const deltaY = e.clientY - dragStartRef.current.startY;
 
     const winWidth = isExpanded ? 720 : 520;
     const winHeight = isExpanded ? 600 : 500;
-
     const maxX = Math.max(10, window.innerWidth - winWidth - 10);
     const maxY = Math.max(10, window.innerHeight - winHeight - 10);
 
     const newX = Math.min(Math.max(10, dragStartRef.current.initialPosX + deltaX), maxX);
     const newY = Math.min(Math.max(10, dragStartRef.current.initialPosY + deltaY), maxY);
 
-    setPosition({ x: newX, y: newY });
-  };
+    // Direct DOM transform update for 120fps smooth movement
+    windowRef.current.style.left = `${newX}px`;
+    windowRef.current.style.top = `${newY}px`;
+  }, [isExpanded]);
 
-  const handlePointerUp = (e: React.PointerEvent) => {
-    setIsDragging(false);
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    if (!isDraggingRef.current) return;
+    isDraggingRef.current = false;
     try {
       (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {}
-  };
+
+    if (windowRef.current) {
+      const rect = windowRef.current.getBoundingClientRect();
+      setPosition({ x: rect.left, y: rect.top });
+    }
+  }, []);
 
   const handleReset = () => {
     if (calculatorRef.current) {
@@ -138,21 +163,17 @@ export const DesmosModal: React.FC<DesmosModalProps> = ({ isOpen, onClose, initi
     } else if (type === 'systems') {
       calculatorRef.current.setExpression({ id: 'eq1', latex: 'y=-1.5' });
       calculatorRef.current.setExpression({ id: 'eq2', latex: 'y=x^2+8x+a' });
-      calculatorRef.current.setExpression({ id: 'slider', latex: 'a=14.5', sliderBounds: { min: '-20', max: '30', step: '0.5' } });
     } else if (type === 'circle') {
-      calculatorRef.current.setExpression({ id: 'circle1', latex: '(x-3)^2+(y+2)^2=25' });
-      calculatorRef.current.setExpression({ id: 'center', latex: '(3,-2)' });
+      calculatorRef.current.setExpression({ id: 'circle', latex: '(x-3)^2+(y+2)^2=25' });
     } else if (type === 'vertex') {
       calculatorRef.current.setExpression({ id: 'quad', latex: 'f(x)=2(x-3)^2-8' });
     }
     setActiveTab('calc');
-    setTimeout(() => calculatorRef.current?.resize(), 100);
+    requestAnimationFrame(() => calculatorRef.current?.resize());
   };
 
-  if (!isOpen) return null;
-
   // Minimized Floating Pill Mode
-  if (isMinimized) {
+  if (isMinimized && isOpen) {
     return (
       <div 
         style={{ left: `${position.x}px`, top: `${position.y}px` }}
@@ -173,7 +194,7 @@ export const DesmosModal: React.FC<DesmosModalProps> = ({ isOpen, onClose, initi
             <button
               onClick={() => {
                 setIsMinimized(false);
-                setTimeout(() => calculatorRef.current?.resize(), 100);
+                requestAnimationFrame(() => calculatorRef.current?.resize());
               }}
               className="p-1 hover:text-amber-400 text-zinc-400 transition-colors"
               title="Perbesar Jendela"
@@ -193,15 +214,19 @@ export const DesmosModal: React.FC<DesmosModalProps> = ({ isOpen, onClose, initi
     );
   }
 
-  // Active Floating Window Mode (NO backdrop, question behind is 100% interactive!)
   const winWidth = isExpanded ? 'w-[720px]' : 'w-[520px] max-w-[94vw]';
   const winHeight = isExpanded ? 'h-[620px]' : 'h-[500px] max-h-[85vh]';
 
+  // Persistent floating container: Hidden via CSS when not open, zero initialization delay!
   return (
     <div 
       ref={windowRef}
-      style={{ left: `${position.x}px`, top: `${position.y}px` }}
-      className={`fixed z-50 pointer-events-auto select-none ${winWidth} ${winHeight} flex flex-col bg-zinc-950 rounded-2xl shadow-2xl shadow-black/70 border border-zinc-700/80 overflow-hidden animate-in fade-in zoom-in-95 duration-100`}
+      style={{ 
+        left: `${position.x}px`, 
+        top: `${position.y}px`,
+        display: isOpen && !isMinimized ? 'flex' : 'none'
+      }}
+      className={`fixed z-50 pointer-events-auto select-none ${winWidth} ${winHeight} flex-col bg-zinc-950 rounded-2xl shadow-2xl shadow-black/70 border border-zinc-700/80 overflow-hidden animate-in fade-in zoom-in-95 duration-75`}
     >
       {/* Draggable Header Bar */}
       <div 
@@ -227,12 +252,11 @@ export const DesmosModal: React.FC<DesmosModalProps> = ({ isOpen, onClose, initi
 
         {/* Window Controls */}
         <div className="flex items-center gap-1.5">
-          {/* Tabs */}
           <div className="flex items-center bg-zinc-900 p-0.5 rounded-lg text-[11px] font-semibold mr-1 border border-zinc-800">
             <button
               onClick={() => {
                 setActiveTab('calc');
-                setTimeout(() => calculatorRef.current?.resize(), 50);
+                requestAnimationFrame(() => calculatorRef.current?.resize());
               }}
               className={`px-2 py-1 rounded-md transition-all ${
                 activeTab === 'calc' 
@@ -250,23 +274,23 @@ export const DesmosModal: React.FC<DesmosModalProps> = ({ isOpen, onClose, initi
                   : 'text-zinc-400 hover:text-white'
               }`}
             >
-              <Sparkles className="w-3 h-3 text-amber-300" />
-              <span>Preset SAT</span>
+              <Sparkles className="w-3 h-3 text-amber-400" />
+              <span>Shortcut</span>
             </button>
           </div>
 
           <button
             onClick={handleReset}
-            title="Reset Kanvas"
-            className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors"
+            title="Reset Papan Grafik"
           >
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
 
           <button
             onClick={() => setIsMinimized(true)}
-            title="Kecilkan ke Bar Mengambang (Minimize)"
-            className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors"
+            title="Minimize ke Floating Pill"
           >
             <Minus className="w-3.5 h-3.5" />
           </button>
@@ -274,108 +298,79 @@ export const DesmosModal: React.FC<DesmosModalProps> = ({ isOpen, onClose, initi
           <button
             onClick={() => {
               setIsExpanded(!isExpanded);
-              setTimeout(() => calculatorRef.current?.resize(), 100);
+              requestAnimationFrame(() => calculatorRef.current?.resize());
             }}
-            title={isExpanded ? "Ukuran Standar" : "Perbesar"}
-            className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors"
+            title={isExpanded ? "Ukuran Standar" : "Perbesar Penuh"}
           >
             {isExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
           </button>
 
           <button
             onClick={onClose}
-            title="Tutup Kalkulator"
-            className="p-1.5 text-zinc-400 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-rose-950/60 rounded-lg text-zinc-400 hover:text-rose-400 transition-colors"
+            title="Tutup Jendela"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      {/* Calculator Body */}
-      <div className="flex-1 bg-white overflow-hidden relative">
-        {activeTab === 'calc' ? (
-          <div 
-            ref={containerRef} 
-            className="w-full h-full"
-          />
-        ) : (
-          <div className="p-4 overflow-y-auto h-full bg-zinc-50 space-y-4 text-xs">
-            <div>
-              <h4 className="font-bold text-zinc-900 flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4 text-amber-500" />
-                <span>Preset Rumus Cepat SAT Math</span>
-              </h4>
-              <p className="text-[11px] text-zinc-500 mt-0.5">
-                Klik salah satu template di bawah untuk langsung menyalin ke kalkulator Desmos.
-              </p>
+      {/* Body */}
+      <div className="flex-1 relative bg-white overflow-hidden flex flex-col">
+        {/* Desmos Iframe Container */}
+        <div 
+          ref={containerRef} 
+          className={`w-full h-full flex-1 ${activeTab === 'calc' ? 'block' : 'hidden'}`}
+        />
+
+        {/* SAT Presets / Shortcut Panel */}
+        {activeTab === 'presets' && (
+          <div className="absolute inset-0 bg-zinc-950 p-4 overflow-y-auto space-y-3 z-10 text-xs">
+            <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
+              <span className="font-bold text-amber-400 flex items-center gap-1.5">
+                <BookOpen className="w-4 h-4" />
+                Template Trik Desmos Digital SAT
+              </span>
+              <span className="text-[11px] text-zinc-400">Klik template untuk langsung memasukkan rumus</span>
             </div>
 
             <div className="grid grid-cols-1 gap-2.5">
-              {/* Linear Regression */}
-              <div className="p-3 bg-white rounded-xl border border-zinc-200 shadow-sm flex items-center justify-between">
-                <div>
-                  <div className="font-bold text-zinc-900 text-xs">Regresi Linear (Tabel x1, y1)</div>
-                  <div className="text-[10px] font-mono text-orange-600">y1 ~ m x1 + b</div>
-                </div>
-                <button
-                  onClick={() => applyPreset('linear_reg')}
-                  className="px-3 py-1.5 bg-orange-50 hover:bg-orange-600 hover:text-white text-orange-700 text-xs font-bold rounded-lg transition-colors"
-                >
-                  Terapkan
-                </button>
-              </div>
+              <button
+                onClick={() => applyPreset('linear_reg')}
+                className="p-3 bg-zinc-900 hover:bg-zinc-800/80 border border-zinc-800 rounded-xl text-left transition-colors group"
+              >
+                <div className="font-bold text-white group-hover:text-amber-400">Regresi Linier Otomatis (y1 ~ mx1 + b)</div>
+                <div className="text-[11px] text-zinc-400 mt-1 font-mono">y_1 ~ m*x_1 + b</div>
+                <div className="text-[10px] text-zinc-500 mt-0.5">Mencari gradien m dan konstanta b dari tabel titik koordinat tanpa rumus manual.</div>
+              </button>
 
-              {/* Systems of Equations with Slider */}
-              <div className="p-3 bg-white rounded-xl border border-zinc-200 shadow-sm flex items-center justify-between">
-                <div>
-                  <div className="font-bold text-zinc-900 text-xs">Sistem Persamaan & Slider Konstanta</div>
-                  <div className="text-[10px] font-mono text-orange-600">y = x^2 + 8x + a (Titik Singgung)</div>
-                </div>
-                <button
-                  onClick={() => applyPreset('systems')}
-                  className="px-3 py-1.5 bg-orange-50 hover:bg-orange-600 hover:text-white text-orange-700 text-xs font-bold rounded-lg transition-colors"
-                >
-                  Terapkan
-                </button>
-              </div>
+              <button
+                onClick={() => applyPreset('quadratic_reg')}
+                className="p-3 bg-zinc-900 hover:bg-zinc-800/80 border border-zinc-800 rounded-xl text-left transition-colors group"
+              >
+                <div className="font-bold text-white group-hover:text-amber-400">Regresi Kuadratik (y1 ~ ax1^2 + bx1 + c)</div>
+                <div className="text-[11px] text-zinc-400 mt-1 font-mono">y_1 ~ a*x_1^2 + b*x_1 + c</div>
+                <div className="text-[10px] text-zinc-500 mt-0.5">Menemukan fungsi kuadrat dari 3 titik data secara instan.</div>
+              </button>
 
-              {/* Quadratic Regression */}
-              <div className="p-3 bg-white rounded-xl border border-zinc-200 shadow-sm flex items-center justify-between">
-                <div>
-                  <div className="font-bold text-zinc-900 text-xs">Regresi Parabola Kuadratik</div>
-                  <div className="text-[10px] font-mono text-orange-600">y1 ~ a x1^2 + b x1 + c</div>
-                </div>
-                <button
-                  onClick={() => applyPreset('quadratic_reg')}
-                  className="px-3 py-1.5 bg-orange-50 hover:bg-orange-600 hover:text-white text-orange-700 text-xs font-bold rounded-lg transition-colors"
-                >
-                  Terapkan
-                </button>
-              </div>
+              <button
+                onClick={() => applyPreset('systems')}
+                className="p-3 bg-zinc-900 hover:bg-zinc-800/80 border border-zinc-800 rounded-xl text-left transition-colors group"
+              >
+                <div className="font-bold text-white group-hover:text-amber-400">Sistem Persamaan & Slider Nilai a</div>
+                <div className="text-[11px] text-zinc-400 mt-1 font-mono">y = -1.5, y = x^2 + 8x + a</div>
+                <div className="text-[10px] text-zinc-500 mt-0.5">Mencari nilai konstanta a agar sistem memiliki tepat satu solusi (titik singgung).</div>
+              </button>
 
-              {/* Circles */}
-              <div className="p-3 bg-white rounded-xl border border-zinc-200 shadow-sm flex items-center justify-between">
-                <div>
-                  <div className="font-bold text-zinc-900 text-xs">Persamaan Lingkaran & Titik Pusat</div>
-                  <div className="text-[10px] font-mono text-orange-600">(x-h)^2 + (y-k)^2 = r^2</div>
-                </div>
-                <button
-                  onClick={() => applyPreset('circle')}
-                  className="px-3 py-1.5 bg-orange-50 hover:bg-orange-600 hover:text-white text-orange-700 text-xs font-bold rounded-lg transition-colors"
-                >
-                  Terapkan
-                </button>
-              </div>
-            </div>
-
-            <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl text-[11px] text-amber-900 space-y-1">
-              <div className="font-bold flex items-center gap-1">
-                <BookOpen className="w-3.5 h-3.5 text-amber-700" />
-                <span>Tips Floating Desmos:</span>
-              </div>
-              <p>• Geser header kalkulator ke sisi kanan agar soal di sebelah kiri tetap bebas dibaca dan diklik.</p>
-              <p>• Gunakan tombol minimize (-) untuk melipat kalkulator sementara saat membaca bacaan panjang.</p>
+              <button
+                onClick={() => applyPreset('circle')}
+                className="p-3 bg-zinc-900 hover:bg-zinc-800/80 border border-zinc-800 rounded-xl text-left transition-colors group"
+              >
+                <div className="font-bold text-white group-hover:text-amber-400">Persamaan Lingkaran & Radius</div>
+                <div className="text-[11px] text-zinc-400 mt-1 font-mono">(x - h)^2 + (y - k)^2 = r^2</div>
+                <div className="text-[10px] text-zinc-500 mt-0.5">Visualisasi pusat lingkaran (h, k) dan jari-jari r untuk soal geometri koordinat.</div>
+              </button>
             </div>
           </div>
         )}

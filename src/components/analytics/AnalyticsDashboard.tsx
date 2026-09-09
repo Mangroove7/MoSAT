@@ -39,38 +39,63 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ onStartT
     return map;
   }, [allQuestions]);
 
-  // Estimated Score calculation
+  // Estimated Score calculation based on authentic user progress
+  const hasHistory = profile.totalAnswered > 0 || Boolean(profile.baselineScore);
   const overallAccuracy = profile.totalAnswered > 0 
     ? Math.round((profile.totalCorrect / profile.totalAnswered) * 100) 
-    : 85;
+    : (profile.baselineScore ? Math.round((profile.baselineScore / 1600) * 100) : 0);
 
   const estimatedScore = useMemo(() => {
+    if (!hasHistory) {
+      return { min: 0, max: 0, current: 0 };
+    }
+    if (profile.baselineScore && profile.totalAnswered < 10) {
+      return { 
+        min: Math.max(400, profile.baselineScore - 30), 
+        max: Math.min(1600, profile.baselineScore + 40), 
+        current: profile.baselineScore 
+      };
+    }
     if (overallAccuracy >= 95) return { min: 1560, max: 1600, current: 1580 };
     if (overallAccuracy >= 90) return { min: 1520, max: 1570, current: 1540 };
     if (overallAccuracy >= 85) return { min: 1470, max: 1530, current: 1500 };
     if (overallAccuracy >= 80) return { min: 1410, max: 1480, current: 1450 };
     if (overallAccuracy >= 70) return { min: 1320, max: 1410, current: 1360 };
-    return { min: 1200, max: 1320, current: 1260 };
-  }, [overallAccuracy]);
+    return { min: 1000, max: 1300, current: 1150 };
+  }, [hasHistory, overallAccuracy, profile.baselineScore, profile.totalAnswered]);
 
-  // Domain accuracy simulation from user profile & mistakes
+  // Domain stats computed authentically
   const domainStats = useMemo(() => {
-    const domains = [
-      { name: 'Information and Ideas', section: 'RW', total: 18, correct: 16 },
-      { name: 'Craft and Structure', section: 'RW', total: 15, correct: 14 },
-      { name: 'Expression of Ideas', section: 'RW', total: 14, correct: 13 },
-      { name: 'Standard English Conventions', section: 'RW', total: 20, correct: 17 },
-      { name: 'Algebra', section: 'Math', total: 22, correct: 20 },
-      { name: 'Advanced Math', section: 'Math', total: 24, correct: 21 },
-      { name: 'Problem-Solving & Data', section: 'Math', total: 16, correct: 14 },
-      { name: 'Geometry & Trigonometry', section: 'Math', total: 12, correct: 11 }
+    const domainNames = [
+      { name: 'Information and Ideas', section: 'RW' },
+      { name: 'Craft and Structure', section: 'RW' },
+      { name: 'Expression of Ideas', section: 'RW' },
+      { name: 'Standard English Conventions', section: 'RW' },
+      { name: 'Algebra', section: 'Math' },
+      { name: 'Advanced Math', section: 'Math' },
+      { name: 'Problem-Solving & Data', section: 'Math' },
+      { name: 'Geometry & Trigonometry', section: 'Math' }
     ];
 
-    return domains.map(d => ({
-      ...d,
-      acc: Math.round((d.correct / d.total) * 100)
-    }));
-  }, []);
+    return domainNames.map(d => {
+      const wrongCount = mistakes.filter(m => {
+        const q = questionsMap[m.questionId];
+        return q && (q.domain === d.name || q.domainCode === d.name);
+      }).length;
+
+      // Estimate domain count proportional to total answered
+      const approxTotal = Math.max(wrongCount, Math.round(profile.totalAnswered / 8));
+      const approxCorrect = Math.max(0, approxTotal - wrongCount);
+      const acc = approxTotal > 0 ? Math.round((approxCorrect / approxTotal) * 100) : 0;
+
+      return {
+        ...d,
+        total: approxTotal,
+        correct: approxCorrect,
+        acc
+      };
+    });
+  }, [mistakes, profile.totalAnswered, questionsMap]);
 
   const handleResolveMistake = (id: string) => {
     StorageService.resolveMistake(id);
