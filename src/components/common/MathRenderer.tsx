@@ -8,8 +8,21 @@ interface MathRendererProps {
 }
 
 /**
+ * Escapes currency dollar signs (e.g. "$200,000", "$15 entry", "$31.78") 
+ * so they don't break KaTeX math formulas or cause LaTeX leakage.
+ */
+function escapeCurrency(text: string): string {
+  if (!text) return '';
+  // Currency with words or punctuation after: $200,000 in, $15 entry, $300 to
+  let res = text.replace(/\$(\d[\d,]*(?:\.\d+)?)(?=\s+[a-zA-Z]|\s*$|\.\s*<|\.$)/g, '&#36;$1');
+  // Standalone price inside paragraph: <p>$31.78.</p>
+  res = res.replace(/(<[a-z]+[^>]*>)\$(\d[\d,]*(?:\.\d+)?)\.?(<\/[a-z]+>)/gi, '$1&#36;$2.$3');
+  return res;
+}
+
+/**
  * Converts College Board's verbal accessible alt-text format
- * (e.g. "StartFraction 12 x plus 28 Over 4 EndFraction", "left parenthesis", "equals", etc.)
+ * (e.g. "StartFraction 12 x plus 28 Over 4 EndFraction", "Superscript StartFraction ...", "equals", etc.)
  * into standard, crystal-clear LaTeX code.
  */
 function cleanVerbalMath(text: string): string {
@@ -33,19 +46,32 @@ function cleanVerbalMath(text: string): string {
   // 2. StartFraction ... Over ... EndFraction (supports nested structures)
   let maxLoop = 6;
   while (res.includes('StartFraction') && maxLoop > 0) {
-    res = res.replace(/StartFraction\s+((?:(?!StartFraction).)+?)\s+Over\s+((?:(?!StartFraction).)+?)\s+EndFraction/g, '\\frac{$1}{$2}');
+    res = res.replace(/StartFraction\s+((?:(?!StartFraction).)+?)\s+Over\s+((?:(?!StartFraction).)+?)\s+EndFraction/gi, '\\frac{$1}{$2}');
     maxLoop--;
   }
 
   // 3. Roots
-  res = res.replace(/RootIndex\s+(\d+)\s+StartRoot\s+(.*?)\s+EndRoot/g, '\\sqrt[$1]{$2}');
-  res = res.replace(/StartRoot\s+(.*?)\s+EndRoot/g, '\\sqrt{$1}');
+  res = res.replace(/RootIndex\s+(\d+)\s+StartRoot\s+(.*?)\s+EndRoot/gi, '\\sqrt[$1]{$2}');
+  res = res.replace(/StartRoot\s+(.*?)\s+EndRoot/gi, '\\sqrt{$1}');
 
   // 4. Absolute values
-  res = res.replace(/StartAbsoluteValue\s+(.*?)\s+EndAbsoluteValue/g, '|{$1}|');
+  res = res.replace(/StartAbsoluteValue\s+(.*?)\s+EndAbsoluteValue/gi, '|{$1}|');
 
-  // 5. Superscripts
-  res = res.replace(/Superscript\s+([a-zA-Z0-9\+\-]+)/g, '^{$1}');
+  // 5. Superscripts with Baseline & fractions
+  // e.g. "Superscript x plus c Baseline" -> "^{x plus c}"
+  res = res.replace(/Superscript\s+(.*?)\s+Baseline/gi, '^{$1}');
+
+  // Superscript followed by \frac{...}{...}
+  res = res.replace(/Superscript\s*(\\frac\{.+?\}\{.+?\})/gi, '^{$1}');
+
+  // Superscript followed by left parenthesis ... right parenthesis
+  res = res.replace(/Superscript\s*left parenthesis\s*(.*?)\s*right parenthesis/gi, '^{(\$1)}');
+
+  // Superscript followed by token or simple expression
+  res = res.replace(/Superscript\s+([a-zA-Z0-9\+\-\.\/]+)/gi, '^{$1}');
+
+  // Clean any remaining "Baseline"
+  res = res.replace(/\bBaseline\b/gi, '');
 
   // 6. Common English verbal fractions
   const FRACTIONS: [RegExp, string][] = [
@@ -89,7 +115,7 @@ function cleanVerbalMath(text: string): string {
     res = res.replace(pat, repl);
   }
 
-  // 7. Verbal math symbols and words
+  // 7. Verbal math symbols, units, and words
   const SYMBOL_REPLACEMENTS: [RegExp, string][] = [
     [/\bleft parenthesis\b/gi, '('],
     [/\bright parenthesis\b/gi, ')'],
@@ -114,13 +140,27 @@ function cleanVerbalMath(text: string): string {
     [/\bdollar sign\b|\bdollar\b/gi, '\\$'],
     [/\bpercent sign\b|\bpercent\b/gi, '\\%'],
     [/\bdegrees\b|\bdegree\b/gi, '^{\\circ}'],
+    [/\bCelsius\b/gi, '^{\\circ}\\text{C}'],
+    [/\bFahrenheit\b/gi, '^{\\circ}\\text{F}'],
     [/\bcomma\b/gi, ', '],
     [/\bperiod\b/gi, '.'],
     [/\bcosine\b/gi, '\\cos '],
     [/\bsine\b/gi, '\\sin '],
     [/\btangent\b/gi, '\\tan '],
     [/\bpi\b/gi, '\\pi '],
-    [/\btheta\b/gi, '\\theta ']
+    [/\btheta\b/gi, '\\theta '],
+    [/\bangle\b/gi, '\\angle '],
+    [/\btriangle\b/gi, '\\triangle '],
+    [/\bcentimeters\b|\bcentimeter\b/gi, '\\text{ cm}'],
+    [/\binches\b|\binch\b/gi, '\\text{ in}'],
+    [/\bfeet\b|\bfoot\b/gi, '\\text{ ft}'],
+    [/\bmeters\b|\bmeter\b/gi, '\\text{ m}'],
+    [/\bkilometers\b|\bkilometer\b/gi, '\\text{ km}'],
+    [/\bkilograms\b|\bkilogram\b/gi, '\\text{ kg}'],
+    [/\bgrams\b|\bgram\b/gi, '\\text{ g}'],
+    [/\bhours\b|\bhour\b/gi, '\\text{ hr}'],
+    [/\bminutes\b|\bminute\b/gi, '\\text{ min}'],
+    [/\bseconds\b|\bsecond\b/gi, '\\text{ sec}']
   ];
 
   for (const [pat, repl] of SYMBOL_REPLACEMENTS) {
@@ -134,8 +174,11 @@ export const MathRenderer: React.FC<MathRendererProps> = ({ content, className =
   const renderedHtml = useMemo(() => {
     if (!content) return '';
 
-    // First handle $$...$$ display math
-    let formatted = content.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
+    // Step 1: Escape standalone currency amounts to prevent LaTeX leaks
+    const safeContent = escapeCurrency(content);
+
+    // Step 2: Handle $$...$$ display math
+    let formatted = safeContent.replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => {
       const clean = cleanVerbalMath(math);
       try {
         return katex.renderToString(clean, { displayMode: true, throwOnError: false });
@@ -144,7 +187,7 @@ export const MathRenderer: React.FC<MathRendererProps> = ({ content, className =
       }
     });
 
-    // Then handle $...$ inline math
+    // Step 3: Handle $...$ inline math
     formatted = formatted.replace(/\$([^\$\n]+?)\$/g, (_, math) => {
       const clean = cleanVerbalMath(math);
       try {

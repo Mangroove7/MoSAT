@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { SATQuestion } from '../../types/sat';
 import { MathRenderer } from '../common/MathRenderer';
-import { Strikethrough, Sparkles, Highlighter, X } from 'lucide-react';
+import { Strikethrough, Sparkles, X } from 'lucide-react';
 
 interface QuestionCardProps {
   question: SATQuestion;
@@ -17,6 +18,16 @@ interface QuestionCardProps {
   activeHighlightColor?: string | null;
 }
 
+function getSafeSavedContent(id: string, type: 'stim' | 'stem', fallback: string | null | undefined): string {
+  try {
+    const raw = sessionStorage.getItem(`mosat_hl_${id}_${type}`);
+    if (raw && raw !== 'null' && raw !== 'undefined' && raw.trim().length > 0) {
+      return raw;
+    }
+  } catch {}
+  return fallback || '';
+}
+
 export const QuestionCard: React.FC<QuestionCardProps> = ({
   question,
   questionNumber,
@@ -30,7 +41,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   onOpenDesmos,
   activeHighlightColor = null
 }) => {
-  // SPR state strictly synced with current question and selectedAnswer
+  // SPR strictly synced with current question and answer
   const [sprInput, setSprInput] = useState(selectedAnswer || '');
 
   useEffect(() => {
@@ -45,34 +56,28 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
 
   const hasStimulus = Boolean(question.stimulus && question.stimulus.trim().length > 0);
 
-  // Highlighter Tool State & DOM references
+  // Highlighting refs & state
   const passageRef = useRef<HTMLDivElement>(null);
-  const [floatingMenu, setFloatingMenu] = useState<{ x: number; y: number } | null>(null);
+  const stemRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
+  const [floatingMenu, setFloatingMenu] = useState<{ x: number; y: number } | null>(null);
 
-  // Load saved highlights for this question from sessionStorage
-  const [passageHtml, setPassageHtml] = useState<string>(() => {
-    try {
-      const saved = sessionStorage.getItem(`mosat_hl_${question.id}`);
-      return saved || question.stimulus || '';
-    } catch {
-      return question.stimulus || '';
-    }
-  });
+  // Content states with null guard
+  const [passageContent, setPassageContent] = useState<string>(() => 
+    getSafeSavedContent(question.id, 'stim', question.stimulus)
+  );
+  const [stemContent, setStemContent] = useState<string>(() => 
+    getSafeSavedContent(question.id, 'stem', question.stem)
+  );
 
   useEffect(() => {
-    try {
-      const saved = sessionStorage.getItem(`mosat_hl_${question.id}`);
-      setPassageHtml(saved || question.stimulus || '');
-    } catch {
-      setPassageHtml(question.stimulus || '');
-    }
+    setPassageContent(getSafeSavedContent(question.id, 'stim', question.stimulus));
+    setStemContent(getSafeSavedContent(question.id, 'stem', question.stem));
     setFloatingMenu(null);
-  }, [question.id, question.stimulus]);
+  }, [question.id, question.stimulus, question.stem]);
 
-  // Apply highlight to a Range
-  const applyHighlightToRange = useCallback((range: Range, color: string) => {
-    if (!passageRef.current) return;
+  // Apply highlight directly to range without destroying KaTeX
+  const applyHighlight = useCallback((range: Range, color: string) => {
     try {
       const mark = document.createElement('mark');
       mark.className = `highlight-${color} cursor-pointer hover:opacity-85 transition-opacity`;
@@ -83,20 +88,23 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
       mark.appendChild(extracted);
       range.insertNode(mark);
 
-      // Save HTML
-      const newHtml = passageRef.current.innerHTML;
-      setPassageHtml(newHtml);
-      try {
-        sessionStorage.setItem(`mosat_hl_${question.id}`, newHtml);
-      } catch {}
+      // Save HTML to sessionStorage safely
+      if (passageRef.current && passageRef.current.contains(mark)) {
+        const h = passageRef.current.innerHTML;
+        if (h && h !== 'null') {
+          sessionStorage.setItem(`mosat_hl_${question.id}_stim`, h);
+        }
+      } else if (stemRef.current && stemRef.current.contains(mark)) {
+        const h = stemRef.current.innerHTML;
+        if (h && h !== 'null') {
+          sessionStorage.setItem(`mosat_hl_${question.id}_stem`, h);
+        }
+      }
     } catch {
       try {
         const mark = document.createElement('mark');
         mark.className = `highlight-${color} cursor-pointer hover:opacity-85 transition-opacity`;
         range.surroundContents(mark);
-        const newHtml = passageRef.current.innerHTML;
-        setPassageHtml(newHtml);
-        sessionStorage.setItem(`mosat_hl_${question.id}`, newHtml);
       } catch (err) {
         console.warn('[MoSAT] Text highlight notice:', err);
       }
@@ -105,42 +113,51 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
     setFloatingMenu(null);
   }, [question.id]);
 
-  // Handle text selection in passage
-  const handlePassageMouseUp = useCallback(() => {
+  // Universal text selection listener across Passage and Question Stem
+  const handleMouseUp = useCallback(() => {
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || !sel.rangeCount) {
       setFloatingMenu(null);
       return;
     }
 
-    const range = sel.getRangeAt(0);
-    if (!passageRef.current || !passageRef.current.contains(range.commonAncestorContainer)) {
+    const text = sel.toString().trim();
+    if (!text || text.length === 0) {
       setFloatingMenu(null);
       return;
     }
 
-    // If a toolbar color is already active, highlight immediately
-    if (activeHighlightColor) {
-      applyHighlightToRange(range, activeHighlightColor);
+    const range = sel.getRangeAt(0);
+    const inPassage = passageRef.current && passageRef.current.contains(range.commonAncestorContainer);
+    const inStem = stemRef.current && stemRef.current.contains(range.commonAncestorContainer);
+
+    if (!inPassage && !inStem) {
+      setFloatingMenu(null);
       return;
     }
 
-    // Otherwise show floating Bluebook tooltip near selection
+    // If toolbar color is active, highlight immediately!
+    if (activeHighlightColor) {
+      applyHighlight(range, activeHighlightColor);
+      return;
+    }
+
+    // Show floating action pill outside the layout
     const rect = range.getBoundingClientRect();
     if (rect && rect.width > 0) {
       savedRangeRef.current = range.cloneRange();
       setFloatingMenu({
-        x: Math.max(10, rect.left + rect.width / 2 - 80),
-        y: Math.max(10, rect.top - 42)
+        x: Math.max(10, rect.left + rect.width / 2 - 75),
+        y: Math.max(10, rect.top - 46)
       });
     }
-  }, [activeHighlightColor, applyHighlightToRange]);
+  }, [activeHighlightColor, applyHighlight]);
 
   // Click on existing mark to unwrap (remove highlight)
-  const handlePassageClick = (e: React.MouseEvent) => {
+  const handleContentClick = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     const mark = target.closest('mark');
-    if (mark && passageRef.current && passageRef.current.contains(mark)) {
+    if (mark) {
       e.stopPropagation();
       const parent = mark.parentNode;
       if (parent) {
@@ -149,54 +166,66 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
         }
         parent.removeChild(mark);
         parent.normalize();
-        const newHtml = passageRef.current.innerHTML;
-        setPassageHtml(newHtml);
-        try {
-          sessionStorage.setItem(`mosat_hl_${question.id}`, newHtml);
-        } catch {}
+
+        // Update storage
+        if (passageRef.current && passageRef.current.contains(parent)) {
+          sessionStorage.setItem(`mosat_hl_${question.id}_stim`, passageRef.current.innerHTML);
+        } else if (stemRef.current && stemRef.current.contains(parent)) {
+          sessionStorage.setItem(`mosat_hl_${question.id}_stem`, stemRef.current.innerHTML);
+        }
       }
       setFloatingMenu(null);
     }
   };
 
-  const handleApplyColorFromMenu = (color: string) => {
+  const handleColorClick = (color: string) => {
     if (savedRangeRef.current) {
-      applyHighlightToRange(savedRangeRef.current, color);
+      applyHighlight(savedRangeRef.current, color);
       savedRangeRef.current = null;
     }
   };
 
   return (
-    <div className="flex-1 overflow-hidden flex flex-col md:flex-row bg-slate-50 divide-y md:divide-y-0 md:divide-x divide-slate-200 relative">
-      {/* Floating Highlight Quick Action Pill */}
-      {floatingMenu && (
+    <div 
+      onMouseUp={handleMouseUp}
+      onClick={handleContentClick}
+      className="flex-1 overflow-hidden flex flex-col md:flex-row bg-slate-50 divide-y md:divide-y-0 md:divide-x divide-slate-200"
+    >
+      {/* Floating Highlight Pill mounted via Portal to document.body so it NEVER interferes with flex layout */}
+      {floatingMenu && typeof document !== 'undefined' && createPortal(
         <div
-          style={{ position: 'fixed', left: `${floatingMenu.x}px`, top: `${floatingMenu.y}px` }}
-          className="z-50 flex items-center gap-1.5 bg-slate-900 text-white px-2 py-1 rounded-xl shadow-xl border border-slate-700 animate-in fade-in zoom-in-95 duration-100"
+          style={{ 
+            position: 'fixed', 
+            left: `${floatingMenu.x}px`, 
+            top: `${floatingMenu.y}px`,
+            zIndex: 9999
+          }}
+          className="flex items-center gap-1.5 bg-slate-900 text-white px-2.5 py-1.5 rounded-xl shadow-2xl border border-slate-700 animate-in fade-in zoom-in-95 pointer-events-auto"
         >
           <button
-            onClick={() => handleApplyColorFromMenu('yellow')}
-            className="w-5 h-5 rounded-full bg-yellow-300 hover:scale-110 transition-transform shadow"
+            onClick={() => handleColorClick('yellow')}
+            className="w-5 h-5 rounded-full bg-yellow-300 hover:scale-110 transition-transform shadow cursor-pointer"
             title="Stabilo Kuning"
           />
           <button
-            onClick={() => handleApplyColorFromMenu('green')}
-            className="w-5 h-5 rounded-full bg-emerald-300 hover:scale-110 transition-transform shadow"
+            onClick={() => handleColorClick('green')}
+            className="w-5 h-5 rounded-full bg-emerald-300 hover:scale-110 transition-transform shadow cursor-pointer"
             title="Stabilo Hijau"
           />
           <button
-            onClick={() => handleApplyColorFromMenu('pink')}
-            className="w-5 h-5 rounded-full bg-pink-300 hover:scale-110 transition-transform shadow"
-            title="Stabilo Pink"
+            onClick={() => handleColorClick('pink')}
+            className="w-5 h-5 rounded-full bg-pink-300 hover:scale-110 transition-transform shadow cursor-pointer"
+            title="Stabilo Merah Muda"
           />
           <button
             onClick={() => setFloatingMenu(null)}
-            className="p-1 hover:text-slate-300 text-slate-400"
-            title="Tutup"
+            className="p-1 hover:text-slate-200 text-slate-400 cursor-pointer ml-0.5"
+            title="Batal"
           >
-            <X className="w-3 h-3" />
+            <X className="w-3.5 h-3.5" />
           </button>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Left Column: Passage / Stimulus / Background */}
@@ -211,13 +240,8 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
             </span>
           </div>
 
-          <div 
-            ref={passageRef} 
-            onMouseUp={handlePassageMouseUp}
-            onClick={handlePassageClick}
-            className="select-text focus:outline-none"
-          >
-            <MathRenderer content={passageHtml} />
+          <div ref={passageRef} className="select-text focus:outline-none">
+            <MathRenderer content={passageContent} />
           </div>
         </div>
       )}
@@ -248,9 +272,9 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
             </div>
           </div>
 
-          {/* Question Stem */}
-          <div className="text-slate-900 font-medium text-sm sm:text-base leading-relaxed select-text">
-            <MathRenderer content={question.stem} />
+          {/* Question Stem with Highlighter Support */}
+          <div ref={stemRef} className="text-slate-900 font-medium text-sm sm:text-base leading-relaxed select-text focus:outline-none">
+            <MathRenderer content={stemContent} />
           </div>
 
           {/* Answer Area: MCQ or SPR */}
