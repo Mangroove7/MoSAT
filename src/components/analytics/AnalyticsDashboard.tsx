@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { StorageService } from '../../services/storageService';
 import { UserProfile, UserMistakeRecord, SATQuestion, ErrorType } from '../../types/sat';
 import { MathRenderer } from '../common/MathRenderer';
@@ -32,7 +32,14 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ onStartT
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [selectedMistakeQuestionId, setSelectedMistakeQuestionId] = useState<string | null>(null);
 
-  const allQuestions = useMemo(() => StorageService.getAllQuestions(), []);
+  const [allQuestions, setAllQuestions] = useState<SATQuestion[]>(() => StorageService.getAllQuestions());
+
+  useEffect(() => {
+    return StorageService.onQuestionsLoaded(() => {
+      setAllQuestions(StorageService.getAllQuestions());
+    });
+  }, []);
+
   const questionsMap = useMemo(() => {
     const map: Record<string, SATQuestion> = {};
     allQuestions.forEach(q => { map[q.id] = q; });

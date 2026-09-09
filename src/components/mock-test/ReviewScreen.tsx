@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Bookmark, AlertCircle, ArrowLeft, CheckCircle2 } from 'lucide-react';
 
 interface ReviewScreenProps {
@@ -25,6 +25,7 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
   const answeredCount = questionIds.filter(id => answers[id] && answers[id].trim().length > 0).length;
   const unansweredCount = totalQuestions - answeredCount;
   const flaggedCount = flaggedIndices.size;
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   return (
     <div className="flex-1 bg-slate-50 overflow-y-auto p-4 sm:p-8 flex flex-col justify-between">
@@ -136,13 +137,86 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
         </button>
 
         <button
-          onClick={onSubmitModule}
+          onClick={() => setShowConfirmModal(true)}
           className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 font-bold text-xs text-white shadow-md transition-all hover:shadow-lg flex items-center gap-2"
         >
           <span>Selesaikan & Kirim Modul</span>
           <span>→</span>
         </button>
       </div>
+
+      {/* Confirmation Modal */}
+      {showConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-200 space-y-6 animate-in zoom-in-95">
+            <div className="space-y-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-orange-600">
+                Konfirmasi Penyelesaian
+              </span>
+              <h3 className="text-xl font-black text-slate-900">
+                Selesaikan {moduleName}?
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Setelah mengirimkan modul ini, Anda tidak dapat kembali untuk mengubah jawaban pada bagian ini.
+              </p>
+            </div>
+
+            {/* Stats Summary */}
+            <div className="grid grid-cols-3 gap-2 text-center py-2">
+              <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded-xl">
+                <div className="text-lg font-black text-emerald-700">{answeredCount}</div>
+                <div className="text-[10px] font-semibold text-emerald-600">Terjawab</div>
+              </div>
+              <div className={`p-2.5 rounded-xl border ${
+                unansweredCount > 0 ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-slate-50 border-slate-200 text-slate-600'
+              }`}>
+                <div className="text-lg font-black">{unansweredCount}</div>
+                <div className="text-[10px] font-semibold">Belum Diisi</div>
+              </div>
+              <div className="bg-purple-50 border border-purple-200 p-2.5 rounded-xl">
+                <div className="text-lg font-black text-purple-700">{flaggedCount}</div>
+                <div className="text-[10px] font-semibold text-purple-600">Ditandai</div>
+              </div>
+            </div>
+
+            {unansweredCount > 0 ? (
+              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="font-bold">Perhatian: Masih ada soal kosong!</div>
+                  <div className="text-[11px] text-amber-800 leading-normal">
+                    Di Digital SAT tidak ada pengurangan skor untuk jawaban salah. Anda sangat disarankan untuk menebak semua nomor yang masih kosong.
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="font-medium">Luar biasa! Semua pertanyaan sudah terjawab.</span>
+              </div>
+            )}
+
+            {/* Modal Actions */}
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                onClick={() => setShowConfirmModal(false)}
+                className="flex-1 py-3 px-4 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs transition-colors"
+              >
+                Kembali Periksa
+              </button>
+              <button
+                onClick={() => {
+                  setShowConfirmModal(false);
+                  onSubmitModule();
+                }}
+                className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-zinc-950 font-black text-xs transition-all shadow-lg shadow-orange-500/25"
+              >
+                Ya, Selesaikan Modul
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

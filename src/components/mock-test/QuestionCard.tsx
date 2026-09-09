@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { SATQuestion } from '../../types/sat';
 import { MathRenderer } from '../common/MathRenderer';
-import { Strikethrough, Sparkles } from 'lucide-react';
+import { Strikethrough, Sparkles, Highlighter, X } from 'lucide-react';
 
 interface QuestionCardProps {
   question: SATQuestion;
@@ -10,10 +10,11 @@ interface QuestionCardProps {
   selectedAnswer: string;
   onSelectAnswer: (answer: string) => void;
   isEliminationMode: boolean;
-  struckThroughOptions: string[]; // list of option IDs struck through
+  struckThroughOptions: string[];
   onToggleStrikeThrough: (optionId: string) => void;
-  showExplanationDirectly?: boolean; // For Drill mode
+  showExplanationDirectly?: boolean;
   onOpenDesmos?: () => void;
+  activeHighlightColor?: string | null;
 }
 
 export const QuestionCard: React.FC<QuestionCardProps> = ({
@@ -26,12 +27,17 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   struckThroughOptions,
   onToggleStrikeThrough,
   showExplanationDirectly = false,
-  onOpenDesmos
+  onOpenDesmos,
+  activeHighlightColor = null
 }) => {
+  // SPR state strictly synced with current question and selectedAnswer
   const [sprInput, setSprInput] = useState(selectedAnswer || '');
 
+  useEffect(() => {
+    setSprInput(selectedAnswer || '');
+  }, [question.id, selectedAnswer]);
+
   const handleSprChange = (val: string) => {
-    // SAT SPR grid-in rules: max 5-6 characters, numbers, slash (/), decimal point (.)
     const clean = val.replace(/[^0-9\/\.\-]/g, '').slice(0, 7);
     setSprInput(clean);
     onSelectAnswer(clean);
@@ -39,8 +45,160 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
 
   const hasStimulus = Boolean(question.stimulus && question.stimulus.trim().length > 0);
 
+  // Highlighter Tool State & DOM references
+  const passageRef = useRef<HTMLDivElement>(null);
+  const [floatingMenu, setFloatingMenu] = useState<{ x: number; y: number } | null>(null);
+  const savedRangeRef = useRef<Range | null>(null);
+
+  // Load saved highlights for this question from sessionStorage
+  const [passageHtml, setPassageHtml] = useState<string>(() => {
+    try {
+      const saved = sessionStorage.getItem(`mosat_hl_${question.id}`);
+      return saved || question.stimulus || '';
+    } catch {
+      return question.stimulus || '';
+    }
+  });
+
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem(`mosat_hl_${question.id}`);
+      setPassageHtml(saved || question.stimulus || '');
+    } catch {
+      setPassageHtml(question.stimulus || '');
+    }
+    setFloatingMenu(null);
+  }, [question.id, question.stimulus]);
+
+  // Apply highlight to a Range
+  const applyHighlightToRange = useCallback((range: Range, color: string) => {
+    if (!passageRef.current) return;
+    try {
+      const mark = document.createElement('mark');
+      mark.className = `highlight-${color} cursor-pointer hover:opacity-85 transition-opacity`;
+      mark.setAttribute('data-color', color);
+      mark.setAttribute('title', 'Klik untuk menghapus stabilo');
+
+      const extracted = range.extractContents();
+      mark.appendChild(extracted);
+      range.insertNode(mark);
+
+      // Save HTML
+      const newHtml = passageRef.current.innerHTML;
+      setPassageHtml(newHtml);
+      try {
+        sessionStorage.setItem(`mosat_hl_${question.id}`, newHtml);
+      } catch {}
+    } catch {
+      try {
+        const mark = document.createElement('mark');
+        mark.className = `highlight-${color} cursor-pointer hover:opacity-85 transition-opacity`;
+        range.surroundContents(mark);
+        const newHtml = passageRef.current.innerHTML;
+        setPassageHtml(newHtml);
+        sessionStorage.setItem(`mosat_hl_${question.id}`, newHtml);
+      } catch (err) {
+        console.warn('[MoSAT] Text highlight notice:', err);
+      }
+    }
+    window.getSelection()?.removeAllRanges();
+    setFloatingMenu(null);
+  }, [question.id]);
+
+  // Handle text selection in passage
+  const handlePassageMouseUp = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) {
+      setFloatingMenu(null);
+      return;
+    }
+
+    const range = sel.getRangeAt(0);
+    if (!passageRef.current || !passageRef.current.contains(range.commonAncestorContainer)) {
+      setFloatingMenu(null);
+      return;
+    }
+
+    // If a toolbar color is already active, highlight immediately
+    if (activeHighlightColor) {
+      applyHighlightToRange(range, activeHighlightColor);
+      return;
+    }
+
+    // Otherwise show floating Bluebook tooltip near selection
+    const rect = range.getBoundingClientRect();
+    if (rect && rect.width > 0) {
+      savedRangeRef.current = range.cloneRange();
+      setFloatingMenu({
+        x: Math.max(10, rect.left + rect.width / 2 - 80),
+        y: Math.max(10, rect.top - 42)
+      });
+    }
+  }, [activeHighlightColor, applyHighlightToRange]);
+
+  // Click on existing mark to unwrap (remove highlight)
+  const handlePassageClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    const mark = target.closest('mark');
+    if (mark && passageRef.current && passageRef.current.contains(mark)) {
+      e.stopPropagation();
+      const parent = mark.parentNode;
+      if (parent) {
+        while (mark.firstChild) {
+          parent.insertBefore(mark.firstChild, mark);
+        }
+        parent.removeChild(mark);
+        parent.normalize();
+        const newHtml = passageRef.current.innerHTML;
+        setPassageHtml(newHtml);
+        try {
+          sessionStorage.setItem(`mosat_hl_${question.id}`, newHtml);
+        } catch {}
+      }
+      setFloatingMenu(null);
+    }
+  };
+
+  const handleApplyColorFromMenu = (color: string) => {
+    if (savedRangeRef.current) {
+      applyHighlightToRange(savedRangeRef.current, color);
+      savedRangeRef.current = null;
+    }
+  };
+
   return (
-    <div className="flex-1 overflow-hidden flex flex-col md:flex-row bg-slate-50 divide-y md:divide-y-0 md:divide-x divide-slate-200">
+    <div className="flex-1 overflow-hidden flex flex-col md:flex-row bg-slate-50 divide-y md:divide-y-0 md:divide-x divide-slate-200 relative">
+      {/* Floating Highlight Quick Action Pill */}
+      {floatingMenu && (
+        <div
+          style={{ position: 'fixed', left: `${floatingMenu.x}px`, top: `${floatingMenu.y}px` }}
+          className="z-50 flex items-center gap-1.5 bg-slate-900 text-white px-2 py-1 rounded-xl shadow-xl border border-slate-700 animate-in fade-in zoom-in-95 duration-100"
+        >
+          <button
+            onClick={() => handleApplyColorFromMenu('yellow')}
+            className="w-5 h-5 rounded-full bg-yellow-300 hover:scale-110 transition-transform shadow"
+            title="Stabilo Kuning"
+          />
+          <button
+            onClick={() => handleApplyColorFromMenu('green')}
+            className="w-5 h-5 rounded-full bg-emerald-300 hover:scale-110 transition-transform shadow"
+            title="Stabilo Hijau"
+          />
+          <button
+            onClick={() => handleApplyColorFromMenu('pink')}
+            className="w-5 h-5 rounded-full bg-pink-300 hover:scale-110 transition-transform shadow"
+            title="Stabilo Pink"
+          />
+          <button
+            onClick={() => setFloatingMenu(null)}
+            className="p-1 hover:text-slate-300 text-slate-400"
+            title="Tutup"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
       {/* Left Column: Passage / Stimulus / Background */}
       {hasStimulus && (
         <div className="md:w-1/2 p-6 sm:p-8 overflow-y-auto bg-white sat-passage text-slate-900 text-sm sm:text-base leading-relaxed select-text border-b md:border-b-0 border-slate-200">
@@ -53,11 +211,18 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
             </span>
           </div>
 
-          <MathRenderer content={question.stimulus || ''} />
+          <div 
+            ref={passageRef} 
+            onMouseUp={handlePassageMouseUp}
+            onClick={handlePassageClick}
+            className="select-text focus:outline-none"
+          >
+            <MathRenderer content={passageHtml} />
+          </div>
         </div>
       )}
 
-      {/* Right Column (or Full Width if no stimulus): Question Prompt & Answer Options */}
+      {/* Right Column: Question Prompt & Answer Options */}
       <div className={`${hasStimulus ? 'md:w-1/2' : 'w-full max-w-4xl mx-auto'} p-6 sm:p-8 overflow-y-auto flex flex-col justify-between bg-white`}>
         <div className="space-y-6">
           {/* Question Number & Tags */}
@@ -84,7 +249,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
           </div>
 
           {/* Question Stem */}
-          <div className="text-slate-900 font-medium text-sm sm:text-base leading-relaxed">
+          <div className="text-slate-900 font-medium text-sm sm:text-base leading-relaxed select-text">
             <MathRenderer content={question.stem} />
           </div>
 
@@ -129,7 +294,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                       </span>
 
                       {/* Option Text */}
-                      <div className={`text-sm text-slate-800 leading-relaxed pt-0.5 ${
+                      <div className={`text-sm text-slate-800 leading-relaxed pt-0.5 select-text ${
                         isStruck ? 'line-through text-slate-400' : ''
                       }`}>
                         <MathRenderer content={option.content} />
@@ -155,16 +320,19 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
             </div>
           ) : (
             /* Student Produced Response (SPR) / Grid-in */
-            <div className="pt-4 max-w-sm space-y-3">
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600">
+            <div className="pt-4 max-w-sm space-y-3" key={`spr-wrapper-${question.id}`}>
+              <label htmlFor={`spr-input-${question.id}`} className="block text-xs font-bold uppercase tracking-wider text-slate-600">
                 Student-Produced Response (Grid-in)
               </label>
               <div className="flex items-center gap-3">
                 <input
+                  id={`spr-input-${question.id}`}
+                  key={`spr-input-${question.id}`}
                   type="text"
                   value={sprInput}
                   onChange={(e) => handleSprChange(e.target.value)}
                   placeholder="Contoh: 14.5 atau 3/4"
+                  autoComplete="off"
                   className="w-full text-lg font-mono px-4 py-3 bg-white border-2 border-slate-300 rounded-xl focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none text-slate-900 shadow-sm"
                 />
               </div>

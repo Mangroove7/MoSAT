@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { SATDomain, SATDifficulty, SATQuestion } from '../../types/sat';
 import { StorageService } from '../../services/storageService';
 import { 
@@ -94,9 +94,15 @@ export const DrillHub: React.FC<DrillHubProps> = ({ onStartDrill, onOpenMistakeR
   const [onlyHard1600, setOnlyHard1600] = useState(false);
   const [drillMode, setDrillMode] = useState<'instant' | 'timed'>('instant');
 
-  const allQuestions = useMemo(() => StorageService.getAllQuestions(), []);
+  const [allQuestions, setAllQuestions] = useState<SATQuestion[]>(() => StorageService.getAllQuestions());
   const mistakes = useMemo(() => StorageService.getMistakes(), []);
   const unresolvedMistakesCount = useMemo(() => mistakes.filter(m => !m.resolved).length, [mistakes]);
+
+  useEffect(() => {
+    return StorageService.onQuestionsLoaded(() => {
+      setAllQuestions(StorageService.getAllQuestions());
+    });
+  }, []);
 
   // Filtered pool
   const filteredQuestions = useMemo(() => {

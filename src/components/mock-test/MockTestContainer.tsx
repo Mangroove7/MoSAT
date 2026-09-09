@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { SATQuestion, MockTestAttempt } from '../../types/sat';
 import { StorageService } from '../../services/storageService';
 import { 
@@ -64,8 +64,14 @@ export const MockTestContainer: React.FC<MockTestContainerProps> = ({ onGoToAnal
   const [mathM2Difficulty, setMathM2Difficulty] = useState<'Easy' | 'Hard'>('Hard');
   const [finalAttempt, setFinalAttempt] = useState<MockTestAttempt | null>(null);
 
-  // Load questions database
-  const allQuestions = useMemo(() => StorageService.getAllQuestions(), []);
+  // Load questions database & listen for background load
+  const [allQuestions, setAllQuestions] = useState<SATQuestion[]>(() => StorageService.getAllQuestions());
+
+  useEffect(() => {
+    return StorageService.onQuestionsLoaded(() => {
+      setAllQuestions(StorageService.getAllQuestions());
+    });
+  }, []);
 
   // Split into sets for modules
   const preTestQuestions = useMemo(() => {
@@ -637,15 +643,37 @@ export const MockTestContainer: React.FC<MockTestContainerProps> = ({ onGoToAnal
     );
   }
 
+  if (stage === 'pre_test_review') {
+    return (
+      <ReviewScreen
+        moduleName="Pre-Test Diagnostik"
+        totalQuestions={preTestQuestions.length}
+        questionIds={preTestQuestions.map(q => q.id)}
+        answers={userAnswers}
+        flaggedIndices={flaggedIndices}
+        onSelectIndex={(idx) => {
+          setCurrentIndex(idx);
+          setStage('pre_test');
+        }}
+        onSubmitModule={handleSubmitPreTest}
+        onReturnToTest={() => setStage('pre_test')}
+      />
+    );
+  }
+
   // Active testing in progress
-  const isMath = stage === 'math_m1' || stage === 'math_m2';
-  const sectionTitle = isMath ? 'Math' : 'Reading and Writing';
-  const moduleText = stage === 'rw_m1' ? 'Module 1' 
+  const isMath = stage === 'math_m1' || stage === 'math_m2' || currentQuestion?.section === 'Math';
+  const isPreTest = stage === 'pre_test';
+  const sectionTitle = isPreTest 
+    ? (currentQuestion?.section === 'Math' ? 'Pre-Test (Math)' : 'Pre-Test (Reading & Writing)')
+    : (isMath ? 'Math' : 'Reading and Writing');
+  const moduleText = isPreTest ? 'Diagnostik 20 Soal'
+    : stage === 'rw_m1' ? 'Module 1' 
     : stage === 'rw_m2' ? `Module 2 (${rwM2Difficulty})`
     : stage === 'math_m1' ? 'Module 1'
     : `Module 2 (${mathM2Difficulty})`;
 
-  const timeSeconds = isMath ? 2100 : 1920; // 35m for Math, 32m for RW
+  const timeSeconds = isPreTest ? 1500 : (isMath ? 2100 : 1920); // 25m for pre_test, 35m for Math, 32m for RW
 
   const handleNext = () => {
     if (currentIndex < currentQuestions.length - 1) {
@@ -699,6 +727,7 @@ export const MockTestContainer: React.FC<MockTestContainerProps> = ({ onGoToAnal
       {/* Question Card Split View */}
       {currentQuestion ? (
         <QuestionCard
+          key={currentQuestion.id}
           question={currentQuestion}
           questionNumber={currentIndex + 1}
           totalQuestions={currentQuestions.length}
@@ -707,6 +736,7 @@ export const MockTestContainer: React.FC<MockTestContainerProps> = ({ onGoToAnal
           isEliminationMode={isEliminationMode}
           struckThroughOptions={struckThroughOptions}
           onToggleStrikeThrough={toggleStrike}
+          activeHighlightColor={activeHighlightColor}
         />
       ) : (
         <div className="flex-1 flex items-center justify-center text-slate-400">

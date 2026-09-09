@@ -99,8 +99,10 @@ export class AuthService {
                 isFirebase: true
               };
             }
-          } catch (err) {
-            console.warn('[MoSAT] Could not read Firestore profile, using auth metadata:', err);
+          } catch (err: any) {
+            if (err?.code !== 'permission-denied') {
+              console.warn('[MoSAT] Could not read Firestore profile, using auth metadata:', err);
+            }
           }
         }
 
@@ -406,7 +408,11 @@ export class AuthService {
 
     if (db && current.isFirebase) {
       setDoc(doc(db, 'users', current.id), { targetScore: newScore }, { merge: true })
-        .catch(err => console.warn('[MoSAT] Firestore targetScore update error:', err));
+        .catch(err => {
+          if (err?.code !== 'permission-denied') {
+            console.warn('[MoSAT] Firestore targetScore update error:', err);
+          }
+        });
     }
 
     const users = this.getUsers();

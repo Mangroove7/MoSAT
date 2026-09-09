@@ -146,6 +146,7 @@ export const DrillSession: React.FC<DrillSessionProps> = ({ questions, mode, onE
 
       {/* Main Question Display */}
       <QuestionCard
+        key={currentQuestion.id}
         question={currentQuestion}
         questionNumber={currentIndex + 1}
         totalQuestions={questions.length}

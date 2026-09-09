@@ -11,6 +11,63 @@ import { SEED_QUESTIONS } from '../data/questionsSeed';
 import { db } from './firebase';
 import { doc, setDoc, getDocs, collection, serverTimestamp } from 'firebase/firestore';
 
+
+// Native IndexedDB Helper for zero-latency question caching
+const IDB_NAME = 'mosat_db';
+const IDB_STORE = 'questions';
+
+function getIdbQuestions(): Promise<SATQuestion[] | null> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !window.indexedDB) return resolve(null);
+    try {
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = (e: any) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) {
+          db.createObjectStore(IDB_STORE);
+        }
+      };
+      req.onsuccess = (e: any) => {
+        const db = e.target.result;
+        const tx = db.transaction(IDB_STORE, 'readonly');
+        const store = tx.objectStore(IDB_STORE);
+        const getReq = store.get('all_questions');
+        getReq.onsuccess = () => resolve(getReq.result || null);
+        getReq.onerror = () => resolve(null);
+      };
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+function saveIdbQuestions(questions: SATQuestion[]): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !window.indexedDB) return resolve();
+    try {
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = (e: any) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) {
+          db.createObjectStore(IDB_STORE);
+        }
+      };
+      req.onsuccess = (e: any) => {
+        const db = e.target.result;
+        const tx = db.transaction(IDB_STORE, 'readwrite');
+        const store = tx.objectStore(IDB_STORE);
+        store.put(questions, 'all_questions');
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      };
+      req.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
 export class StorageService {
   private static getUserId(): string {
     const user = AuthService.getCurrentUser();
@@ -80,7 +137,7 @@ export class StorageService {
         setDoc(doc(db, 'users', user.id), {
           profile,
           updatedAt: serverTimestamp()
-        }, { merge: true }).catch(err => console.warn('[MoSAT] Cloud profile sync notice:', err));
+        }, { merge: true }).catch(err => { if (err?.code !== 'permission-denied') console.warn('[MoSAT] Cloud profile sync notice:', err); });
       } catch {}
     }
   }
@@ -333,15 +390,33 @@ export class StorageService {
 
       return true;
     } catch (err) {
-      console.warn('[MoSAT] Cloud restore note:', err);
+      if ((err as any)?.code !== 'permission-denied') console.warn('[MoSAT] Cloud restore note:', err);
       return false;
     }
   }
 
-  // Asynchronous Questions Database with Memory Cache
+  // Asynchronous Questions Database with Memory Cache & IndexedDB
   private static fullBankLoaded = false;
   private static questionCache: SATQuestion[] = [];
   private static loadingPromise: Promise<SATQuestion[]> | null = null;
+  private static subscribers: Array<(count: number) => void> = [];
+
+  static onQuestionsLoaded(callback: (count: number) => void): () => void {
+    this.subscribers.push(callback);
+    if (this.fullBankLoaded) {
+      callback(this.getAllQuestions().length);
+    }
+    return () => {
+      this.subscribers = this.subscribers.filter(cb => cb !== callback);
+    };
+  }
+
+  private static notifySubscribers(): void {
+    const total = this.getAllQuestions().length;
+    this.subscribers.forEach(cb => {
+      try { cb(total); } catch {}
+    });
+  }
 
   static async loadFullQuestionBank(): Promise<SATQuestion[]> {
     if (this.fullBankLoaded && this.questionCache.length > 0) {
@@ -352,6 +427,18 @@ export class StorageService {
     }
 
     this.loadingPromise = (async () => {
+      // 1. Try instant load from IndexedDB first (takes ~20ms)
+      try {
+        const cached = await getIdbQuestions();
+        if (Array.isArray(cached) && cached.length > 100) {
+          this.questionCache = cached;
+          this.fullBankLoaded = true;
+          this.notifySubscribers();
+          return this.getAllQuestions();
+        }
+      } catch {}
+
+      // 2. Fetch full question bank if not in IndexedDB
       try {
         const res = await fetch('/sat_questions_1000.json');
         if (res.ok) {
@@ -359,6 +446,8 @@ export class StorageService {
           if (Array.isArray(data) && data.length > 0) {
             this.questionCache = data;
             this.fullBankLoaded = true;
+            this.notifySubscribers();
+            saveIdbQuestions(data).catch(() => {});
           }
         }
       } catch (err) {
