@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { SATQuestion } from '../../types/sat';
 import { MathRenderer } from '../common/MathRenderer';
-import { Strikethrough, Sparkles, X, Check, CornerDownLeft } from 'lucide-react';
+import { Strikethrough, Sparkles, X, Check, CornerDownLeft, Lock } from 'lucide-react';
 import { isAnswerCorrect } from '../../services/scoringService';
 
 interface QuestionCardProps {
@@ -306,33 +306,41 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
               {question.options.map(option => {
                 const isSelected = selectedAnswer === option.letter;
                 const isStruck = struckThroughOptions.includes(option.id);
+                const isLocked = Boolean(selectedAnswer);
 
                 return (
                   <div 
                     key={option.id}
                     className={`relative flex items-center rounded-xl border transition-all duration-150 ${
                       isSelected 
-                        ? 'border-blue-600 bg-blue-50/50 shadow-sm ring-1 ring-blue-600' 
-                        : isStruck
-                          ? 'border-slate-200 bg-slate-100/70 opacity-40'
-                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/70'
+                        ? 'border-blue-600 bg-blue-50/60 shadow-sm ring-2 ring-blue-500/20' 
+                        : isLocked
+                          ? 'border-slate-200 bg-slate-50/50 opacity-55'
+                          : isStruck
+                            ? 'border-slate-200 bg-slate-100/70 opacity-40'
+                            : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/70'
                     }`}
                   >
                     {/* Option Selection Click Area */}
                     <button
+                      type="button"
+                      disabled={isLocked}
                       onClick={() => {
+                        if (isLocked) return;
                         if (isEliminationMode) {
                           onToggleStrikeThrough(option.id);
                         } else {
                           onSelectAnswer(option.letter);
                         }
                       }}
-                      className="flex-1 flex items-start gap-3.5 p-3.5 sm:p-4 text-left"
+                      className={`flex-1 flex items-start gap-3.5 p-3.5 sm:p-4 text-left ${
+                        isLocked ? 'cursor-default' : 'cursor-pointer'
+                      }`}
                     >
                       {/* Letter badge */}
                       <span className={`w-7 h-7 shrink-0 rounded-full flex items-center justify-center font-bold text-xs transition-colors ${
                         isSelected 
-                          ? 'bg-blue-600 text-white' 
+                          ? 'bg-blue-600 text-white shadow-xs' 
                           : isStruck
                             ? 'bg-slate-300 text-slate-600 line-through'
                             : 'bg-slate-100 text-slate-700 border border-slate-300'
@@ -350,20 +358,30 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
 
                     {/* Strikethrough Quick Button */}
                     <button
+                      type="button"
+                      disabled={isLocked}
                       onClick={(e) => {
                         e.stopPropagation();
+                        if (isLocked) return;
                         onToggleStrikeThrough(option.id);
                       }}
-                      className={`p-3 text-slate-400 hover:text-slate-700 rounded-r-xl transition-colors ${
+                      className={`p-3 text-slate-400 hover:text-slate-700 rounded-r-xl transition-colors disabled:opacity-20 disabled:hover:text-slate-400 ${
                         isStruck ? 'text-red-500 font-bold' : ''
                       }`}
-                      title={isStruck ? "Batalkan coret" : "Coret pilihan ini (eliminasi)"}
+                      title={isLocked ? "Jawaban sudah terkunci" : (isStruck ? "Batalkan coret" : "Coret pilihan ini (eliminasi)")}
                     >
                       <Strikethrough className="w-4 h-4" />
                     </button>
                   </div>
                 );
               })}
+
+              {Boolean(selectedAnswer) && (
+                <div className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold pt-1 animate-in fade-in">
+                  <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span>Jawaban tersimpan otomatis dan terkunci: <strong className="text-slate-900">Pilihan {selectedAnswer}</strong></span>
+                </div>
+              )}
             </div>
           ) : (
             /* Student Produced Response (SPR) / Grid-in */
@@ -387,7 +405,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                   onChange={(e) => handleSprChange(e.target.value)}
                   onKeyDown={handleSprKeyDown}
                   onBlur={handleSprBlur}
-                  disabled={showExplanationDirectly && Boolean(selectedAnswer)}
+                  disabled={Boolean(selectedAnswer)}
                   placeholder="Contoh: 14.5 atau 3/4"
                   autoComplete="off"
                   className="flex-1 text-lg font-mono font-bold px-4 py-3 bg-white border-2 border-slate-300 rounded-xl focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none text-slate-900 shadow-sm disabled:bg-slate-100 disabled:text-slate-500 transition-all"
@@ -395,19 +413,26 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                 <button
                   type="button"
                   onClick={handleCommitSpr}
-                  disabled={!sprInput.trim() || (showExplanationDirectly && Boolean(selectedAnswer))}
+                  disabled={!sprInput.trim() || Boolean(selectedAnswer)}
                   className="px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:hover:bg-blue-600 text-white font-bold text-xs rounded-xl transition-all shadow-sm flex items-center gap-1.5 whitespace-nowrap active:scale-95"
                   title="Tekan Enter atau klik untuk mengonfirmasi jawaban"
                 >
                   <Check className="w-4 h-4" />
-                  <span>Jawab (Enter)</span>
+                  <span>{selectedAnswer ? 'Tersimpan ✓' : 'Jawab (Enter)'}</span>
                 </button>
               </div>
-              <p className="text-[11px] text-slate-500 flex items-center gap-1.5 flex-wrap">
-                <span>Ketik angka desimal atau pecahan murni, lalu tekan</span>
-                <kbd className="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded text-[10px] font-mono font-bold text-slate-700">Enter ↵</kbd>
-                <span>atau klik tombol <strong>Jawab</strong>.</span>
-              </p>
+              {selectedAnswer ? (
+                <p className="text-[11px] text-slate-500 flex items-center gap-1.5 font-semibold animate-in fade-in">
+                  <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span>Jawaban isian terkunci: <strong className="font-mono text-slate-800">{selectedAnswer}</strong></span>
+                </p>
+              ) : (
+                <p className="text-[11px] text-slate-500 flex items-center gap-1.5 flex-wrap">
+                  <span>Ketik angka desimal atau pecahan murni, lalu tekan</span>
+                  <kbd className="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded text-[10px] font-mono font-bold text-slate-700">Enter ↵</kbd>
+                  <span>atau klik tombol <strong>Jawab</strong>.</span>
+                </p>
+              )}
             </div>
           )}
 

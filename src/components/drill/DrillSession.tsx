@@ -47,6 +47,9 @@ export const DrillSession: React.FC<DrillSessionProps> = ({ questions, mode, onE
   const isCorrect = currentQuestion ? isAnswerCorrect(currentAnswer, currentQuestion.correctAnswer) : false;
 
   const handleSelectAnswer = (ans: string) => {
+    // If already answered, do not allow changing answer
+    if (userAnswers[currentQuestion.id]) return;
+
     setUserAnswers(prev => ({ ...prev, [currentQuestion.id]: ans }));
     if (mode === 'instant') {
       setHasChecked(true);

@@ -732,7 +732,12 @@ export const MockTestContainer: React.FC<MockTestContainerProps> = ({ onGoToAnal
           questionNumber={currentIndex + 1}
           totalQuestions={currentQuestions.length}
           selectedAnswer={userAnswers[currentQuestion.id] || ''}
-          onSelectAnswer={(ans) => setUserAnswers(prev => ({ ...prev, [currentQuestion.id]: ans }))}
+          onSelectAnswer={(ans) => {
+            setUserAnswers(prev => {
+              if (prev[currentQuestion.id]) return prev;
+              return { ...prev, [currentQuestion.id]: ans };
+            });
+          }}
           isEliminationMode={isEliminationMode}
           struckThroughOptions={struckThroughOptions}
           onToggleStrikeThrough={toggleStrike}
