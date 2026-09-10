@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SATQuestion } from '../../types/sat';
 import { StorageService } from '../../services/storageService';
+import { isAnswerCorrect } from '../../services/scoringService';
 import { QuestionCard } from '../mock-test/QuestionCard';
 import { DesmosModal } from '../common/DesmosModal';
 import { ReferenceSheetModal } from '../common/ReferenceSheetModal';
@@ -13,7 +14,9 @@ import {
   Calculator, 
   FileText, 
   Sparkles,
-  Trophy
+  Trophy,
+  RotateCcw,
+  Home
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -32,21 +35,22 @@ export const DrillSession: React.FC<DrillSessionProps> = ({ questions, mode, onE
   const [isDesmosOpen, setIsDesmosOpen] = useState(false);
   const [isReferenceOpen, setIsReferenceOpen] = useState(false);
   const [addedToMistakes, setAddedToMistakes] = useState<Record<string, boolean>>({});
+  const [showSummaryModal, setShowSummaryModal] = useState(false);
 
   // Summary counts
   const [correctCount, setCorrectCount] = useState(0);
 
-  const currentQuestion = questions[currentIndex];
+  const currentQuestion = questions[currentIndex] || questions[0];
   const isLast = currentIndex === questions.length - 1;
-  const currentAnswer = userAnswers[currentQuestion.id] || '';
+  const currentAnswer = userAnswers[currentQuestion?.id] || '';
 
-  const isCorrect = currentAnswer.trim().toLowerCase() === currentQuestion.correctAnswer.trim().toLowerCase();
+  const isCorrect = currentQuestion ? isAnswerCorrect(currentAnswer, currentQuestion.correctAnswer) : false;
 
   const handleSelectAnswer = (ans: string) => {
     setUserAnswers(prev => ({ ...prev, [currentQuestion.id]: ans }));
     if (mode === 'instant') {
       setHasChecked(true);
-      const isRight = ans.trim().toLowerCase() === currentQuestion.correctAnswer.trim().toLowerCase();
+      const isRight = isAnswerCorrect(ans, currentQuestion.correctAnswer);
       StorageService.recordQuestionAnswered(currentQuestion.id, isRight);
       if (isRight) {
         setCorrectCount(prev => prev + 1);
@@ -58,14 +62,56 @@ export const DrillSession: React.FC<DrillSessionProps> = ({ questions, mode, onE
 
   const handleNext = () => {
     if (isLast) {
-      // Finish drill
-      confetti({ particleCount: 80, spread: 60 });
-      onExit();
+      // Calculate latest accuracy
+      const latestCorrect = isCorrect && mode === 'instant' ? correctCount : (
+        mode === 'instant' ? correctCount : (
+          questions.reduce((acc, q) => {
+            const ans = userAnswers[q.id];
+            return acc + (isAnswerCorrect(ans, q.correctAnswer) ? 1 : 0);
+          }, 0)
+        )
+      );
+
+      // Save drill session history to storage
+      const answersMap: Record<string, { answer: string; isCorrect: boolean; timeSeconds: number }> = {};
+      questions.forEach(q => {
+        const a = userAnswers[q.id] || '';
+        answersMap[q.id] = {
+          answer: a,
+          isCorrect: isAnswerCorrect(a, q.correctAnswer),
+          timeSeconds: 60
+        };
+      });
+
+      StorageService.saveDrillSession({
+        id: `drill-${Date.now()}`,
+        date: new Date().toISOString().split('T')[0],
+        domain: currentQuestion.domain,
+        difficulty: currentQuestion.difficulty,
+        totalQuestions: questions.length,
+        correctCount: latestCorrect,
+        totalTimeSeconds: questions.length * 60,
+        questionIds: questions.map(q => q.id),
+        answers: answersMap
+      });
+
+      confetti({ particleCount: 90, spread: 65 });
+      setShowSummaryModal(true);
     } else {
       setCurrentIndex(prev => prev + 1);
       setHasChecked(false);
       setStruckThroughOptions([]);
     }
+  };
+
+  const handleRestart = () => {
+    setCurrentIndex(0);
+    setUserAnswers({});
+    setHasChecked(false);
+    setStruckThroughOptions([]);
+    setCorrectCount(0);
+    setAddedToMistakes({});
+    setShowSummaryModal(false);
   };
 
   const toggleStrike = (optId: string) => {
@@ -208,6 +254,72 @@ export const DrillSession: React.FC<DrillSessionProps> = ({ questions, mode, onE
         isOpen={isReferenceOpen}
         onClose={() => setIsReferenceOpen(false)}
       />
+
+      {/* Drill Completion Summary Modal */}
+      {showSummaryModal && (
+        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in">
+          <div className="bg-white rounded-3xl border border-stone-200 shadow-2xl max-w-md w-full p-6 sm:p-8 space-y-6 text-center animate-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 bg-gradient-to-tr from-amber-500 to-orange-500 rounded-2xl mx-auto flex items-center justify-center shadow-lg shadow-orange-500/30 text-white">
+              <Trophy className="w-8 h-8" />
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-orange-600 bg-orange-50 border border-orange-200 px-3 py-1 rounded-full">
+                {currentQuestion.domain}
+              </span>
+              <h3 className="text-2xl font-black text-stone-900 tracking-tight pt-2">
+                Sesi Drill Selesai!
+              </h3>
+              <p className="text-xs text-stone-600">
+                Pencapaian latihan spesifik Anda telah disimpan ke riwayat drill lokal.
+              </p>
+            </div>
+
+            {/* Metrics */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-stone-50 border border-stone-200 p-3 rounded-2xl">
+                <div className="text-xl font-black text-emerald-600">
+                  {correctCount}
+                </div>
+                <div className="text-[10px] font-bold text-stone-500 uppercase tracking-wider">Benar</div>
+              </div>
+
+              <div className="bg-stone-50 border border-stone-200 p-3 rounded-2xl">
+                <div className="text-xl font-black text-orange-600">
+                  {questions.length > 0 ? Math.round((correctCount / questions.length) * 100) : 0}%
+                </div>
+                <div className="text-[10px] font-bold text-stone-500 uppercase tracking-wider">Akurasi</div>
+              </div>
+
+              <div className="bg-stone-50 border border-stone-200 p-3 rounded-2xl">
+                <div className="text-xl font-black text-rose-600">
+                  {questions.length - correctCount}
+                </div>
+                <div className="text-[10px] font-bold text-stone-500 uppercase tracking-wider">Salah</div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+              <button
+                onClick={handleRestart}
+                className="w-full sm:w-1/2 py-3 px-4 bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Ulangi Drill</span>
+              </button>
+
+              <button
+                onClick={onExit}
+                className="w-full sm:w-1/2 py-3 px-4 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-xs rounded-xl shadow-md shadow-orange-500/25 transition-all flex items-center justify-center gap-2"
+              >
+                <Home className="w-3.5 h-3.5" />
+                <span>Menu Drill Hub</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

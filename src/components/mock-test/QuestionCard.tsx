@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { SATQuestion } from '../../types/sat';
 import { MathRenderer } from '../common/MathRenderer';
-import { Strikethrough, Sparkles, X } from 'lucide-react';
+import { Strikethrough, Sparkles, X, Check, CornerDownLeft } from 'lucide-react';
+import { isAnswerCorrect } from '../../services/scoringService';
 
 interface QuestionCardProps {
   question: SATQuestion;
@@ -48,10 +49,32 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
     setSprInput(selectedAnswer || '');
   }, [question.id, selectedAnswer]);
 
+  // Only update local input while typing - do NOT immediately validate
   const handleSprChange = (val: string) => {
     const clean = val.replace(/[^0-9\/\.\-]/g, '').slice(0, 7);
     setSprInput(clean);
+  };
+
+  // Commit and validate answer on explicit user action (Enter key or Submit button)
+  const handleCommitSpr = () => {
+    const clean = sprInput.trim();
+    if (!clean) return;
     onSelectAnswer(clean);
+  };
+
+  const handleSprKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleCommitSpr();
+    }
+  };
+
+  const handleSprBlur = () => {
+    // In Mock Test / Pre-Test (non-instant mode), save on blur so student doesn't lose answer if clicking Next
+    // In Instant Drill mode, do not trigger on blur to prevent accidental early validation when clicking tools
+    if (!showExplanationDirectly && sprInput.trim() && sprInput.trim() !== selectedAnswer) {
+      onSelectAnswer(sprInput.trim());
+    }
   };
 
   const hasStimulus = Boolean(question.stimulus && question.stimulus.trim().length > 0);
@@ -344,24 +367,46 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
             </div>
           ) : (
             /* Student Produced Response (SPR) / Grid-in */
-            <div className="pt-4 max-w-sm space-y-3" key={`spr-wrapper-${question.id}`}>
-              <label htmlFor={`spr-input-${question.id}`} className="block text-xs font-bold uppercase tracking-wider text-slate-600">
-                Student-Produced Response (Grid-in)
-              </label>
-              <div className="flex items-center gap-3">
+            <div className="pt-4 max-w-md space-y-3" key={`spr-wrapper-${question.id}`}>
+              <div className="flex items-center justify-between">
+                <label htmlFor={`spr-input-${question.id}`} className="block text-xs font-bold uppercase tracking-wider text-slate-600">
+                  Student-Produced Response (Grid-in)
+                </label>
+                {selectedAnswer && (
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+                    Tersimpan: <span className="font-mono font-bold text-slate-900">{selectedAnswer}</span>
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
                 <input
                   id={`spr-input-${question.id}`}
                   key={`spr-input-${question.id}`}
                   type="text"
                   value={sprInput}
                   onChange={(e) => handleSprChange(e.target.value)}
+                  onKeyDown={handleSprKeyDown}
+                  onBlur={handleSprBlur}
+                  disabled={showExplanationDirectly && Boolean(selectedAnswer)}
                   placeholder="Contoh: 14.5 atau 3/4"
                   autoComplete="off"
-                  className="w-full text-lg font-mono px-4 py-3 bg-white border-2 border-slate-300 rounded-xl focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none text-slate-900 shadow-sm"
+                  className="flex-1 text-lg font-mono font-bold px-4 py-3 bg-white border-2 border-slate-300 rounded-xl focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none text-slate-900 shadow-sm disabled:bg-slate-100 disabled:text-slate-500 transition-all"
                 />
+                <button
+                  type="button"
+                  onClick={handleCommitSpr}
+                  disabled={!sprInput.trim() || (showExplanationDirectly && Boolean(selectedAnswer))}
+                  className="px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:hover:bg-blue-600 text-white font-bold text-xs rounded-xl transition-all shadow-sm flex items-center gap-1.5 whitespace-nowrap active:scale-95"
+                  title="Tekan Enter atau klik untuk mengonfirmasi jawaban"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Jawab (Enter)</span>
+                </button>
               </div>
-              <p className="text-[11px] text-slate-500">
-                Ketikkan angka desimal atau pecahan murni. Maksimal 5-6 karakter.
+              <p className="text-[11px] text-slate-500 flex items-center gap-1.5 flex-wrap">
+                <span>Ketik angka desimal atau pecahan murni, lalu tekan</span>
+                <kbd className="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded text-[10px] font-mono font-bold text-slate-700">Enter ↵</kbd>
+                <span>atau klik tombol <strong>Jawab</strong>.</span>
               </p>
             </div>
           )}
@@ -372,11 +417,11 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <div className="flex items-center gap-2">
                   <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
-                    selectedAnswer.trim().toLowerCase() === question.correctAnswer.trim().toLowerCase()
+                    isAnswerCorrect(selectedAnswer, question.correctAnswer)
                       ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                       : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
                   }`}>
-                    {selectedAnswer.trim().toLowerCase() === question.correctAnswer.trim().toLowerCase()
+                    {isAnswerCorrect(selectedAnswer, question.correctAnswer)
                       ? '✓ Jawaban Anda Benar'
                       : `✗ Salah (Kunci: ${question.correctAnswer})`
                     }

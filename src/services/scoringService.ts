@@ -102,3 +102,36 @@ export function calculateFullTestScore(
     percentile
   };
 }
+
+/**
+ * Validates user answer against correct answer, supporting exact MCQ matches
+ * and numerical/fractional equivalence for Student-Produced Response (SPR) grid-in questions.
+ */
+export function isAnswerCorrect(userAns: string | null | undefined, correctAns: string | null | undefined): boolean {
+  if (!userAns || !correctAns) return false;
+  const u = userAns.trim().toLowerCase();
+  const c = correctAns.trim().toLowerCase();
+  if (u === c) return true;
+
+  // Numerical equivalence for SPR (e.g. 7/25 vs 0.28, .75 vs 0.75, 3/4 vs 0.75)
+  const parseVal = (str: string): number | null => {
+    if (str.includes('/')) {
+      const parts = str.split('/');
+      if (parts.length === 2) {
+        const num = parseFloat(parts[0]);
+        const den = parseFloat(parts[1]);
+        if (!isNaN(num) && !isNaN(den) && den !== 0) return num / den;
+      }
+    }
+    const val = parseFloat(str);
+    return isNaN(val) ? null : val;
+  };
+
+  const uVal = parseVal(u);
+  const cVal = parseVal(c);
+  if (uVal !== null && cVal !== null) {
+    return Math.abs(uVal - cVal) < 1e-6;
+  }
+
+  return false;
+}

@@ -93,6 +93,8 @@ export const DrillHub: React.FC<DrillHubProps> = ({ onStartDrill, onOpenMistakeR
   const [selectedDifficulty, setSelectedDifficulty] = useState<SATDifficulty | 'All'>('All');
   const [onlyHard1600, setOnlyHard1600] = useState(false);
   const [drillMode, setDrillMode] = useState<'instant' | 'timed'>('instant');
+  const [questionCount, setQuestionCount] = useState<number | 'all'>(10);
+  const [customCountInput, setCustomCountInput] = useState<string>('10');
 
   const [allQuestions, setAllQuestions] = useState<SATQuestion[]>(() => StorageService.getAllQuestions());
   const mistakes = useMemo(() => StorageService.getMistakes(), []);
@@ -115,9 +117,20 @@ export const DrillHub: React.FC<DrillHubProps> = ({ onStartDrill, onOpenMistakeR
     });
   }, [allQuestions, selectedSection, selectedDomain, selectedDifficulty, onlyHard1600]);
 
+  const totalAvailable = filteredQuestions.length;
+  const effectiveQuantity = useMemo(() => {
+    if (totalAvailable === 0) return 0;
+    if (questionCount === 'all') return totalAvailable;
+    return Math.min(questionCount, totalAvailable);
+  }, [questionCount, totalAvailable]);
+
   const handleStart = () => {
     if (filteredQuestions.length === 0) return;
-    onStartDrill(filteredQuestions, drillMode);
+    // Shuffle pool so student gets a fresh, non-repetitive set each drill
+    const shuffled = [...filteredQuestions].sort(() => Math.random() - 0.5);
+    const toTake = questionCount === 'all' ? shuffled.length : Math.min(questionCount, shuffled.length);
+    const sampledQuestions = shuffled.slice(0, toTake);
+    onStartDrill(sampledQuestions, drillMode);
   };
 
   return (
@@ -161,7 +174,7 @@ export const DrillHub: React.FC<DrillHubProps> = ({ onStartDrill, onOpenMistakeR
               disabled={filteredQuestions.length === 0}
               className="w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 disabled:opacity-50 font-bold text-sm text-white rounded-2xl shadow-lg shadow-orange-500/25 transition-all flex items-center justify-center gap-2 hover:scale-102"
             >
-              <span>Mulai Drill ({filteredQuestions.length} Soal)</span>
+              <span>Mulai Drill ({effectiveQuantity} Soal)</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
@@ -239,7 +252,7 @@ export const DrillHub: React.FC<DrillHubProps> = ({ onStartDrill, onOpenMistakeR
 
           {/* Difficulty filter if not onlyHard1600 */}
           {!onlyHard1600 && (
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className="text-stone-500 font-medium">Tingkat Kesulitan:</span>
               {(['All', 'Easy', 'Medium', 'Hard'] as const).map(diff => (
                 <button
@@ -256,6 +269,80 @@ export const DrillHub: React.FC<DrillHubProps> = ({ onStartDrill, onOpenMistakeR
               ))}
             </div>
           )}
+
+          {/* Question Quantity Selector */}
+          <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-stone-100">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-stone-700 font-bold flex items-center gap-1.5">
+                <Layers className="w-4 h-4 text-orange-600" />
+                <span>Kuantitas Soal:</span>
+              </span>
+              <div className="flex flex-wrap items-center gap-1 bg-stone-100 p-1 rounded-xl">
+                {[5, 10, 15, 20].map(num => (
+                  <button
+                    key={num}
+                    onClick={() => {
+                      setQuestionCount(num);
+                      setCustomCountInput(String(num));
+                    }}
+                    disabled={totalAvailable === 0}
+                    className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1 ${
+                      questionCount === num
+                        ? 'bg-orange-600 text-white shadow-sm'
+                        : 'text-stone-600 hover:text-stone-900'
+                    }`}
+                  >
+                    <span>{num} Soal</span>
+                    {num === 10 && (
+                      <span className={`text-[9px] px-1 py-0.2 rounded font-bold uppercase ${
+                        questionCount === num ? 'bg-orange-700 text-orange-100' : 'bg-stone-200 text-stone-600'
+                      }`}>
+                        Ideal
+                      </span>
+                    )}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setQuestionCount('all')}
+                  disabled={totalAvailable === 0}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                    questionCount === 'all'
+                      ? 'bg-orange-600 text-white shadow-sm'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                  title="Kerjakan semua soal yang cocok dengan filter aktif"
+                >
+                  Semua ({totalAvailable})
+                </button>
+              </div>
+
+              {/* Custom count input */}
+              <div className="flex items-center gap-1.5 pl-1">
+                <span className="text-stone-400 text-[11px]">Kustom:</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={totalAvailable > 0 ? totalAvailable : 1}
+                  value={customCountInput}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setCustomCountInput(val);
+                    const n = parseInt(val, 10);
+                    if (!isNaN(n) && n > 0) {
+                      setQuestionCount(Math.min(n, totalAvailable));
+                    }
+                  }}
+                  disabled={totalAvailable === 0}
+                  className="w-16 px-2.5 py-1 bg-white border border-stone-300 rounded-lg text-xs font-bold text-center text-stone-900 focus:outline-none focus:border-orange-500 shadow-2xs"
+                />
+                <span className="text-stone-500 text-[11px]">soal</span>
+              </div>
+            </div>
+
+            <div className="text-xs text-stone-500 font-medium">
+              Tersedia <span className="font-bold text-stone-900">{totalAvailable}</span> soal cocok
+            </div>
+          </div>
         </div>
 
         {/* 8 Domains Grid with Yellow-Orange Accents */}
@@ -271,7 +358,12 @@ export const DrillHub: React.FC<DrillHubProps> = ({ onStartDrill, onOpenMistakeR
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {DOMAINS_CONFIG.filter(d => selectedSection === 'All' || d.section === selectedSection).map(item => {
-              const count = allQuestions.filter(q => q.domain === item.domain).length;
+              const count = allQuestions.filter(q => {
+                if (q.domain !== item.domain) return false;
+                if (onlyHard1600 && q.difficulty !== 'Hard') return false;
+                if (!onlyHard1600 && selectedDifficulty !== 'All' && q.difficulty !== selectedDifficulty) return false;
+                return true;
+              }).length;
               const isSelected = selectedDomain === item.domain;
 
               return (
