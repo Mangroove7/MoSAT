@@ -9,7 +9,7 @@ import {
 import { AuthService } from './authService';
 import { SEED_QUESTIONS } from '../data/questionsSeed';
 import { db } from './firebase';
-import { doc, setDoc, getDocs, collection, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getDocs, collection, serverTimestamp, deleteDoc } from 'firebase/firestore';
 
 
 // Native IndexedDB Helper for zero-latency question caching
@@ -68,6 +68,28 @@ function saveIdbQuestions(questions: SATQuestion[]): Promise<void> {
   });
 }
 
+// Local calendar date helper (YYYY-MM-DD) avoiding timezone distortion
+export function getLocalDateString(d: Date = new Date()): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// Difference in calendar days between two "YYYY-MM-DD" dates (dateStr2 - dateStr1)
+export function getDayDifference(dateStr1: string, dateStr2: string): number {
+  if (!dateStr1 || !dateStr2) return 0;
+  try {
+    const [y1, m1, d1] = dateStr1.split('-').map(Number);
+    const [y2, m2, d2] = dateStr2.split('-').map(Number);
+    const utc1 = Date.UTC(y1, m1 - 1, d1);
+    const utc2 = Date.UTC(y2, m2 - 1, d2);
+    return Math.round((utc2 - utc1) / (1000 * 60 * 60 * 24));
+  } catch {
+    return 0;
+  }
+}
+
 export class StorageService {
   private static getUserId(): string {
     const user = AuthService.getCurrentUser();
@@ -80,11 +102,12 @@ export class StorageService {
 
   static getProfile(): UserProfile {
     const user = AuthService.getCurrentUser();
+    const today = getLocalDateString();
     const defaultProfile: UserProfile = {
       name: user ? user.name : 'Tamu (Guest)',
       targetScore: user ? user.targetScore : 1550,
       streak: 0,
-      lastActiveDate: new Date().toISOString().split('T')[0],
+      lastActiveDate: today,
       dailyGoal: 20,
       todayAnsweredCount: 0,
       totalAnswered: 0,
@@ -105,20 +128,37 @@ export class StorageService {
         profile.targetScore = user.targetScore;
       }
 
-      // Check daily streak renewal
-      const today = new Date().toISOString().split('T')[0];
+      let modified = false;
+
+      // Check date continuity & daily streak renewal
       if (profile.lastActiveDate !== today) {
-        const lastDate = new Date(profile.lastActiveDate);
-        const currentDate = new Date(today);
-        const diffDays = Math.floor((currentDate.getTime() - lastDate.getTime()) / (1000 * 3600 * 24));
-        
-        if (diffDays === 1) {
-          // Continuous
-        } else if (diffDays > 1) {
-          profile.streak = 1;
+        const diffDays = getDayDifference(profile.lastActiveDate, today);
+        if (diffDays > 1) {
+          // Missed more than 1 day without practice -> streak broken
+          if (profile.streak !== 0) {
+            profile.streak = 0;
+            modified = true;
+          }
         }
-        profile.todayAnsweredCount = 0;
+        // If diffDays === 1: Yesterday was active! Keep streak intact until user practices today.
+        // Do NOT overwrite lastActiveDate yet so recordQuestionAnswered can detect diffDays === 1.
+
+        // Reset today's answered count on a new day
+        if (profile.todayAnsweredCount !== 0) {
+          profile.todayAnsweredCount = 0;
+          modified = true;
+        }
+      }
+
+      // Auto-heal: If user has activity logged today or answered questions today, ensure streak is at least 1
+      const countToday = (profile.activityHistory && profile.activityHistory[today]) || profile.todayAnsweredCount || 0;
+      if (countToday > 0 && (!profile.streak || profile.streak === 0)) {
+        profile.streak = 1;
         profile.lastActiveDate = today;
+        modified = true;
+      }
+
+      if (modified) {
         this.saveProfile(profile);
       }
       return profile;
@@ -129,6 +169,13 @@ export class StorageService {
 
   static saveProfile(profile: UserProfile): void {
     localStorage.setItem(this.key('profile'), JSON.stringify(profile));
+
+    // Dispatch global event for instant UI re-renders across all tabs & components
+    if (typeof window !== 'undefined') {
+      try {
+        window.dispatchEvent(new CustomEvent('mosat-profile-updated', { detail: profile }));
+      } catch {}
+    }
 
     // Cloud sync if user logged into Firebase
     const user = AuthService.getCurrentUser();
@@ -161,7 +208,7 @@ export class StorageService {
       baselineScore: score,
       preTestCompleted: true,
       preTestDetails: {
-        date: new Date().toISOString().split('T')[0],
+        date: getLocalDateString(),
         score,
         rwScore,
         mathScore
@@ -171,12 +218,35 @@ export class StorageService {
 
   static recordQuestionAnswered(questionId: string, isCorrect: boolean): void {
     const profile = this.getProfile();
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateString();
     
+    // Automatic Streak Calculation
+    if (!profile.lastActiveDate) {
+      // First practice ever
+      profile.streak = 1;
+      profile.lastActiveDate = today;
+      profile.todayAnsweredCount = 0;
+    } else if (profile.lastActiveDate !== today) {
+      const diffDays = getDayDifference(profile.lastActiveDate, today);
+      if (diffDays === 1) {
+        // Continuous from yesterday -> increment streak!
+        profile.streak = (profile.streak || 0) + 1;
+      } else {
+        // Inactive for >1 day -> start fresh streak of 1
+        profile.streak = 1;
+      }
+      profile.lastActiveDate = today;
+      profile.todayAnsweredCount = 0;
+    } else {
+      // Already active today -> ensure minimum streak of 1
+      if (!profile.streak || profile.streak === 0) {
+        profile.streak = 1;
+      }
+    }
+
     profile.todayAnsweredCount += 1;
     profile.totalAnswered += 1;
     if (isCorrect) profile.totalCorrect += 1;
-    profile.lastActiveDate = today;
     
     if (!profile.activityHistory) profile.activityHistory = {};
     profile.activityHistory[today] = (profile.activityHistory[today] || 0) + 1;
@@ -236,7 +306,7 @@ export class StorageService {
         questionId,
         userAnswer,
         correctAnswer,
-        date: new Date().toISOString().split('T')[0],
+        date: getLocalDateString(),
         errorType,
         userNotes,
         resolved: false
@@ -273,6 +343,18 @@ export class StorageService {
           }, { merge: true }).catch(err => console.warn('[MoSAT] Cloud resolve mistake sync notice:', err));
         } catch {}
       }
+    }
+  }
+
+  static deleteMistake(mistakeId: string): void {
+    const mistakes = this.getMistakes().filter(m => m.id !== mistakeId);
+    this.saveMistakes(mistakes);
+
+    const user = AuthService.getCurrentUser();
+    if (db && user && user.isFirebase) {
+      try {
+        deleteDoc(doc(db, 'users', user.id, 'mistakes', mistakeId)).catch(err => console.warn('[MoSAT] Cloud delete mistake sync notice:', err));
+      } catch {}
     }
   }
 

@@ -35,9 +35,21 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ onStartT
   const [allQuestions, setAllQuestions] = useState<SATQuestion[]>(() => StorageService.getAllQuestions());
 
   useEffect(() => {
-    return StorageService.onQuestionsLoaded(() => {
+    const handleProfileUpdate = () => {
+      setProfile(StorageService.getProfile());
+    };
+    window.addEventListener('mosat-profile-updated', handleProfileUpdate);
+    window.addEventListener('storage', handleProfileUpdate);
+
+    const unsubscribe = StorageService.onQuestionsLoaded(() => {
       setAllQuestions(StorageService.getAllQuestions());
     });
+
+    return () => {
+      window.removeEventListener('mosat-profile-updated', handleProfileUpdate);
+      window.removeEventListener('storage', handleProfileUpdate);
+      unsubscribe();
+    };
   }, []);
 
   const questionsMap = useMemo(() => {

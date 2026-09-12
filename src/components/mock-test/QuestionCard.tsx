@@ -375,13 +375,6 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                   </div>
                 );
               })}
-
-              {Boolean(selectedAnswer) && (
-                <div className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold pt-1 animate-in fade-in">
-                  <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                  <span>Jawaban tersimpan otomatis dan terkunci: <strong className="text-slate-900">Pilihan {selectedAnswer}</strong></span>
-                </div>
-              )}
             </div>
           ) : (
             /* Student Produced Response (SPR) / Grid-in */

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Flame, 
   Target, 
@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { StorageService } from '../services/storageService';
 import { AuthService, AuthUser } from '../services/authService';
+import { UserProfile } from '../types/sat';
 
 export type ActiveTab = 'mock' | 'drill' | 'vocab' | 'materi' | 'desmos' | 'analytics';
 
@@ -40,7 +41,19 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenEditProfile,
   onSignOut
 }) => {
-  const profile = StorageService.getProfile();
+  const [profile, setProfile] = useState<UserProfile>(() => StorageService.getProfile());
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setProfile(StorageService.getProfile());
+    };
+    window.addEventListener('mosat-profile-updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    return () => {
+      window.removeEventListener('mosat-profile-updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, []);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
