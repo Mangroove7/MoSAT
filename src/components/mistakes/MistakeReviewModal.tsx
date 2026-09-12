@@ -3,6 +3,7 @@ import { StorageService } from '../../services/storageService';
 import { UserMistakeRecord, SATQuestion, ErrorType } from '../../types/sat';
 import { MathRenderer } from '../common/MathRenderer';
 import { DesmosModal } from '../common/DesmosModal';
+import { isAnswerCorrect } from '../../services/scoringService';
 import { 
   X, 
   CheckCircle2, 
@@ -132,12 +133,28 @@ export const MistakeReviewModal: React.FC<MistakeReviewModalProps> = ({
     });
   }, [mistakes, filterType, errorFilter, sectionFilter, questionMap]);
 
-  // Reset attempt when changing question
+  // Safe index calculation
   const safeIndex = filteredMistakes.length > 0 
     ? Math.min(Math.max(0, currentIndex), filteredMistakes.length - 1)
     : 0;
   const currentMistake = filteredMistakes[safeIndex];
   const currentQuestion = currentMistake ? questionMap[currentMistake.questionId] : null;
+
+  // Keep currentIndex clamped within bounds when list length changes
+  useEffect(() => {
+    if (filteredMistakes.length > 0 && currentIndex >= filteredMistakes.length) {
+      setCurrentIndex(Math.max(0, filteredMistakes.length - 1));
+    }
+  }, [filteredMistakes.length, currentIndex]);
+
+  // CRITICAL: Reset re-attempt states whenever the active mistake changes
+  useEffect(() => {
+    setSelectedAnswer('');
+    setHasSubmitted(false);
+    setIsCorrectOnRetry(false);
+    setIsEditingNote(false);
+    setNoteText(currentMistake?.userNotes || '');
+  }, [currentMistake?.id]);
 
   const handleSelectQuestion = (idx: number) => {
     setCurrentIndex(idx);
@@ -151,6 +168,12 @@ export const MistakeReviewModal: React.FC<MistakeReviewModalProps> = ({
     StorageService.deleteMistake(mistakeId);
     const updated = StorageService.getMistakes();
     setMistakes(updated);
+
+    setSelectedAnswer('');
+    setHasSubmitted(false);
+    setIsCorrectOnRetry(false);
+    setIsEditingNote(false);
+
     if (currentIndex >= updated.length) {
       setCurrentIndex(Math.max(0, updated.length - 1));
     }
@@ -159,7 +182,7 @@ export const MistakeReviewModal: React.FC<MistakeReviewModalProps> = ({
 
   const handleCheckRetry = () => {
     if (!selectedAnswer.trim() || !currentQuestion || !currentMistake) return;
-    const isCorrect = selectedAnswer.trim().toLowerCase() === currentQuestion.correctAnswer.trim().toLowerCase();
+    const isCorrect = isAnswerCorrect(selectedAnswer, currentQuestion.correctAnswer);
     setIsCorrectOnRetry(isCorrect);
     setHasSubmitted(true);
 
@@ -180,9 +203,17 @@ export const MistakeReviewModal: React.FC<MistakeReviewModalProps> = ({
 
   const handleToggleMastered = () => {
     if (!currentMistake) return;
-    StorageService.resolveMistake(currentMistake.id);
+    const nextStatus = !currentMistake.resolved;
+    StorageService.resolveMistake(currentMistake.id, nextStatus);
     const updated = StorageService.getMistakes();
     setMistakes(updated);
+
+    // Explicitly reset re-attempt state so the next question cannot inherit it
+    setSelectedAnswer('');
+    setHasSubmitted(false);
+    setIsCorrectOnRetry(false);
+    setIsEditingNote(false);
+
     if (onMistakesUpdated) onMistakesUpdated();
   };
 

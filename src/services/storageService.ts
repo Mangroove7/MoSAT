@@ -327,18 +327,18 @@ export class StorageService {
     }
   }
 
-  static resolveMistake(mistakeId: string): void {
+  static resolveMistake(mistakeId: string, resolved: boolean = true): void {
     const mistakes = this.getMistakes();
     const item = mistakes.find(m => m.id === mistakeId);
     if (item) {
-      item.resolved = true;
+      item.resolved = resolved;
       this.saveMistakes(mistakes);
 
       const user = AuthService.getCurrentUser();
       if (db && user && user.isFirebase) {
         try {
           setDoc(doc(db, 'users', user.id, 'mistakes', mistakeId), {
-            resolved: true,
+            resolved,
             resolvedAt: serverTimestamp()
           }, { merge: true }).catch(err => console.warn('[MoSAT] Cloud resolve mistake sync notice:', err));
         } catch {}
